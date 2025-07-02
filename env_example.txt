@@ -1,0 +1,11 @@
+# Copy this file to .env and add your actual API key
+
+# OpenAI API Configuration
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4o-mini
+
+# Instructions:
+# 1. Rename this file from env_example.txt to .env
+# 2. Replace 'your_openai_api_key_here' with your actual OpenAI API key
+# 3. Optionally change the model (gpt-4o-mini is cost-effective)
+# 4. Keep the .env file private and don't commit it to version control 
