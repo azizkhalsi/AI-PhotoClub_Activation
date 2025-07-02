@@ -24,15 +24,18 @@ APP_DESCRIPTION = "Generate personalized emails for photography clubs using AI w
 
 # Cost Tracking Configuration (pricing per 1M tokens)
 PRICING = {
-    'o3-mini': {
-        'input': 2.00,   
-        'output': 8.00  
+    'o3': {
+        'input': 2.00,           # $2.00 per 1M tokens
+        'cached_input': 0.50,    # $0.50 per 1M cached tokens
+        'output': 8.00           # $8.00 per 1M tokens
     },
-    'gpt-4o-mini': {
-        'input': 0.40, 
-        'output': 1.60  
+    'gpt-4.1-nano': {
+        'input': 0.100,          # $0.100 per 1M tokens
+        'cached_input': 0.025,   # $0.025 per 1M cached tokens
+        'output': 0.400          # $0.400 per 1M tokens
     }
 }
 
-# Web Search Tool Cost (estimated)
-WEB_SEARCH_COST_PER_QUERY = 0.001  # $0.001 per search query 
+# Web Search Tool Cost for O3 models
+WEB_SEARCH_COST_PER_1K_CALLS = 10.00  # $10.00 per 1K calls
+WEB_SEARCH_COST_PER_QUERY = WEB_SEARCH_COST_PER_1K_CALLS / 1000  # $0.01 per search query 

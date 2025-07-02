@@ -20,25 +20,34 @@ class CostTracker:
             'total_cost': 0.0
         }
     
-    def calculate_token_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
-        """Calculate cost based on token usage"""
+    def calculate_token_cost(self, model: str, input_tokens: int, output_tokens: int, cached_tokens: int = 0) -> float:
+        """Calculate cost based on token usage including cached tokens"""
         if model not in PRICING:
             return 0.0
         
-        input_cost = (input_tokens / 1_000_000) * PRICING[model]['input']
+        # Calculate regular input cost
+        regular_input_tokens = max(0, input_tokens - cached_tokens)
+        input_cost = (regular_input_tokens / 1_000_000) * PRICING[model]['input']
+        
+        # Calculate cached input cost if applicable
+        cached_cost = 0.0
+        if cached_tokens > 0 and 'cached_input' in PRICING[model]:
+            cached_cost = (cached_tokens / 1_000_000) * PRICING[model]['cached_input']
+        
+        # Calculate output cost
         output_cost = (output_tokens / 1_000_000) * PRICING[model]['output']
         
-        return input_cost + output_cost
+        return input_cost + cached_cost + output_cost
     
-    def add_search_cost(self, input_tokens: int, output_tokens: int):
+    def add_search_cost(self, input_tokens: int, output_tokens: int, cached_tokens: int = 0):
         """Add cost for O3 search operation"""
-        cost = self.calculate_token_cost(SEARCH_MODEL, input_tokens, output_tokens)
+        cost = self.calculate_token_cost(SEARCH_MODEL, input_tokens, output_tokens, cached_tokens)
         self.costs['search_cost'] += cost
         self.costs['total_cost'] += cost
     
-    def add_content_cost(self, input_tokens: int, output_tokens: int):
+    def add_content_cost(self, input_tokens: int, output_tokens: int, cached_tokens: int = 0):
         """Add cost for GPT-4.1-nano content generation"""
-        cost = self.calculate_token_cost(CONTENT_MODEL, input_tokens, output_tokens)
+        cost = self.calculate_token_cost(CONTENT_MODEL, input_tokens, output_tokens, cached_tokens)
         self.costs['content_cost'] += cost
         self.costs['total_cost'] += cost
     
@@ -171,9 +180,11 @@ class EmailPersonalizer:
             
             # Track costs
             if hasattr(response, 'usage') and response.usage:
+                cached_tokens = getattr(response.usage, 'prompt_tokens_cached', 0) if hasattr(response.usage, 'prompt_tokens_cached') else 0
                 cost_tracker.add_search_cost(
                     response.usage.prompt_tokens,
-                    response.usage.completion_tokens
+                    response.usage.completion_tokens,
+                    cached_tokens
                 )
             
             research_result = response.choices[0].message.content.strip()
@@ -223,9 +234,11 @@ class EmailPersonalizer:
             
             # Track costs
             if hasattr(response, 'usage') and response.usage:
+                cached_tokens = getattr(response.usage, 'prompt_tokens_cached', 0) if hasattr(response.usage, 'prompt_tokens_cached') else 0
                 cost_tracker.add_content_cost(
                     response.usage.prompt_tokens,
-                    response.usage.completion_tokens
+                    response.usage.completion_tokens,
+                    cached_tokens
                 )
             
             personalized_content = response.choices[0].message.content.strip()
