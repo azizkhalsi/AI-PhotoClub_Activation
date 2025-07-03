@@ -7,10 +7,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.email_personalizer import EmailPersonalizer
 from src.config import *
-from streamlit.pages.email_generator import email_generator_page
-from streamlit.pages.club_status import club_status_page
-from streamlit.pages.settings import settings_page
-from streamlit.pages.cost_analytics import cost_analytics_page
+from pages.email_generator import email_generator_page
+from pages.club_status import club_status_page
+from pages.settings import settings_page
+from pages.cost_analytics import cost_analytics_page
 
 # Page configuration
 st.set_page_config(

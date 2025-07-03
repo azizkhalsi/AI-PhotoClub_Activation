@@ -9,9 +9,6 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 SEARCH_MODEL = os.getenv('SEARCH_MODEL', 'o3')  # O3 for web search research
 CONTENT_MODEL = os.getenv('CONTENT_MODEL', 'gpt-4.1-nano')  # GPT-4.1-nano for content generation
 
-# Database Configuration
-DATABASE_PATH = os.getenv('DATABASE_PATH', 'email_tracking.db')
-
 # CSV Configuration
 CLUBS_CSV_PATH = os.getenv('CLUBS_CSV_PATH', 'test_results_20250701_092437.csv')
 

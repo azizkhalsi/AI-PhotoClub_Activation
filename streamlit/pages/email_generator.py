@@ -91,13 +91,13 @@ def email_generator_page(personalizer):
             st.markdown("### 💰 Estimated Costs")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("O3 Search", "~$0.001-0.005")
+                st.metric("O3 Search", "~$0.002-0.010")
             with col2:
-                st.metric("GPT-4o-mini Content", "~$0.0001-0.0005")
+                st.metric("GPT-4.1-nano Content", "~$0.0001-0.0005")
             with col3:
-                st.metric("Web Search", "$0.001")
+                st.metric("Web Search", "$0.010")
             with col4:
-                st.metric("Total Est.", "~$0.0021-0.0056")
+                st.metric("Total Est.", "~$0.0121-0.0156")
             
             # Generate new email
             if st.button("🚀 Generate Personalized Email", type="primary"):
@@ -115,7 +115,7 @@ def generate_new_email(personalizer, club_name):
             
             email, content, research, costs = personalizer.generate_personalized_email(club_name)
             
-            status_text.text("✨ Generated personalized content with GPT-4o-mini...")
+            status_text.text("✨ Generated personalized content with GPT-4.1-nano...")
             progress_bar.progress(66)
             
             personalizer.save_generated_email(club_name, content, email, costs)
@@ -132,7 +132,7 @@ def generate_new_email(personalizer, club_name):
         with col1:
             st.metric("🔍 O3 Search", f"${costs['search_cost']:.6f}")
         with col2:
-            st.metric("✨ GPT-4o-mini Content", f"${costs['content_cost']:.6f}")
+            st.metric("✨ GPT-4.1-nano Content", f"${costs['content_cost']:.6f}")
         with col3:
             st.metric("🌐 Web Search", f"${costs['web_search_cost']:.6f}")
         with col4:
@@ -150,7 +150,7 @@ def generate_new_email(personalizer, club_name):
                 st.write(research)
         
         with col2:
-            with st.expander("✨ GPT-4o-mini Personalized Content"):
+            with st.expander("✨ GPT-4.1-nano Personalized Content"):
                 st.write(content)
         
         # Action buttons

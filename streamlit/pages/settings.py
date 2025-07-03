@@ -28,24 +28,26 @@ def settings_page():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("**O3-mini (Search & Research):**")
+        st.markdown("**O3 (Search & Research):**")
         st.markdown(f"""
         - **Purpose:** Club research and web search
-        - **Input Cost:** ${PRICING['o3-mini']['input']:.2f} per 1M tokens
-        - **Output Cost:** ${PRICING['o3-mini']['output']:.2f} per 1M tokens
+        - **Input Cost:** ${PRICING['o3']['input']:.2f} per 1M tokens
+        - **Cached Input:** ${PRICING['o3']['cached_input']:.2f} per 1M tokens
+        - **Output Cost:** ${PRICING['o3']['output']:.2f} per 1M tokens
         - **Configuration:** No temperature/max_tokens (as requested)
         """)
     
     with col2:
-        st.markdown("**GPT-4o-mini (Content Generation):**")
+        st.markdown("**GPT-4.1-nano (Content Generation):**")
         st.markdown(f"""
         - **Purpose:** Personalized content generation
-        - **Input Cost:** ${PRICING['gpt-4o-mini']['input']:.2f} per 1M tokens
-        - **Output Cost:** ${PRICING['gpt-4o-mini']['output']:.2f} per 1M tokens
+        - **Input Cost:** ${PRICING['gpt-4.1-nano']['input']:.3f} per 1M tokens
+        - **Cached Input:** ${PRICING['gpt-4.1-nano']['cached_input']:.3f} per 1M tokens
+        - **Output Cost:** ${PRICING['gpt-4.1-nano']['output']:.3f} per 1M tokens
         - **Configuration:** Temperature=0.8, Max Tokens=150
         """)
     
-    st.info(f"🌐 **Web Search Cost:** ${WEB_SEARCH_COST_PER_QUERY:.3f} per query")
+    st.info(f"🌐 **Web Search Cost:** ${WEB_SEARCH_COST_PER_QUERY:.3f} per query (${WEB_SEARCH_COST_PER_1K_CALLS:.2f} per 1K calls)")
     
     # File Configuration
     st.subheader("📁 File Configuration")

@@ -1,6 +1,5 @@
 import openai
 import pandas as pd
-import sqlite3
 import os
 from datetime import datetime
 import json
@@ -23,9 +22,10 @@ class CostTracker:
     def calculate_token_cost(self, model: str, input_tokens: int, output_tokens: int, cached_tokens: int = 0) -> float:
         """Calculate cost based on token usage including cached tokens"""
         if model not in PRICING:
+            print(f"⚠️ Warning: Model '{model}' not found in pricing configuration")
             return 0.0
         
-        # Calculate regular input cost
+        # Calculate regular input cost (exclude cached tokens from regular input)
         regular_input_tokens = max(0, input_tokens - cached_tokens)
         input_cost = (regular_input_tokens / 1_000_000) * PRICING[model]['input']
         
@@ -37,7 +37,18 @@ class CostTracker:
         # Calculate output cost
         output_cost = (output_tokens / 1_000_000) * PRICING[model]['output']
         
-        return input_cost + cached_cost + output_cost
+        total_cost = input_cost + cached_cost + output_cost
+        
+        # Log detailed token usage and costs
+        print(f"📊 Token Usage for {model}:")
+        print(f"   Input tokens: {input_tokens:,}")
+        print(f"   Regular input tokens: {regular_input_tokens:,} (${input_cost:.6f})")
+        if cached_tokens > 0:
+            print(f"   Cached input tokens: {cached_tokens:,} (${cached_cost:.6f})")
+        print(f"   Output tokens: {output_tokens:,} (${output_cost:.6f})")
+        print(f"   Total cost: ${total_cost:.6f}")
+        
+        return total_cost
     
     def add_search_cost(self, input_tokens: int, output_tokens: int, cached_tokens: int = 0):
         """Add cost for O3 search operation"""
@@ -63,43 +74,86 @@ class CostTracker:
 
 class EmailPersonalizer:
     def __init__(self):
-        self.openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        self.db_path = DATABASE_PATH
-        self._initialize_database()
+        if not OPENAI_API_KEY:
+            raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY in environment variables or .env file")
         
-    def _initialize_database(self):
-        """Initialize SQLite database to track sent emails and costs"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS sent_emails (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                club_name TEXT UNIQUE NOT NULL,
-                email_sent_date TEXT,
-                personalized_content TEXT,
-                generated_email TEXT,
-                search_cost REAL DEFAULT 0.0,
-                content_cost REAL DEFAULT 0.0,
-                web_search_cost REAL DEFAULT 0.0,
-                total_cost REAL DEFAULT 0.0,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        try:
+            # Initialize OpenAI client with explicit parameters only
+            self.openai_client = openai.OpenAI(
+                api_key=OPENAI_API_KEY,
+                timeout=60.0,
+                max_retries=3,
             )
-        ''')
+        except TypeError as e:
+            # If there's a parameter issue, try with minimal parameters
+            try:
+                self.openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            except Exception as e2:
+                raise ValueError(f"Failed to initialize OpenAI client: {e2}")
+        except Exception as e:
+            raise ValueError(f"Failed to initialize OpenAI client: {e}")
         
-        conn.commit()
-        conn.close()
+        self.tracking_csv_path = 'sent_emails_tracking.csv'
+        self._initialize_tracking_csv()
+        
+    def _initialize_tracking_csv(self):
+        """Initialize CSV file to track sent emails and costs"""
+        import os
+        if not os.path.exists(self.tracking_csv_path):
+            tracking_df = pd.DataFrame(columns=[
+                'club_name', 'email_sent_date', 'personalized_content', 
+                'generated_email', 'search_cost', 'content_cost', 
+                'web_search_cost', 'total_cost', 'created_at'
+            ])
+            tracking_df.to_csv(self.tracking_csv_path, index=False)
     
     def load_clubs_data(self) -> pd.DataFrame:
         """Load clubs data from CSV file"""
         try:
-            df = pd.read_csv(CLUBS_CSV_PATH)
+            # Load CSV with more robust parsing
+            df = pd.read_csv(
+                CLUBS_CSV_PATH,
+                encoding='utf-8',
+                quotechar='"',
+                escapechar='\\',
+                on_bad_lines='skip',  # Skip malformed lines
+                engine='python'  # Use Python engine for better error handling
+            )
+            
+            print(f"✅ Loaded {len(df)} records from CSV")
+            print(f"📊 Columns: {list(df.columns)}")
+            
             # Get unique clubs (since CSV has multiple contacts per club)
-            unique_clubs = df.groupby('Club').first().reset_index()
-            return unique_clubs
-        except Exception as e:
-            print(f"Error loading clubs data: {e}")
+            if 'Club' in df.columns:
+                unique_clubs = df.groupby('Club').first().reset_index()
+                print(f"✅ Found {len(unique_clubs)} unique clubs")
+                return unique_clubs
+            else:
+                print(f"❌ 'Club' column not found in CSV. Available columns: {list(df.columns)}")
+                return pd.DataFrame()
+                
+        except FileNotFoundError:
+            print(f"❌ CSV file not found: {CLUBS_CSV_PATH}")
             return pd.DataFrame()
+        except Exception as e:
+            print(f"❌ Error loading clubs data: {e}")
+            print(f"   Trying alternative parsing method...")
+            
+            # Fallback: try with different parameters
+            try:
+                df = pd.read_csv(
+                    CLUBS_CSV_PATH,
+                    encoding='utf-8',
+                    on_bad_lines='skip',
+                    engine='c',
+                    low_memory=False
+                )
+                print(f"✅ Fallback method loaded {len(df)} records")
+                unique_clubs = df.groupby('Club').first().reset_index()
+                return unique_clubs
+            except Exception as e2:
+                print(f"❌ Fallback method also failed: {e2}")
+                return pd.DataFrame()
     
     def load_email_template(self) -> str:
         """Load the base email template"""
@@ -112,26 +166,24 @@ class EmailPersonalizer:
     
     def check_email_sent(self, club_name: str) -> Tuple[bool, Optional[Dict]]:
         """Check if email has already been sent to a club"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT email_sent_date, personalized_content, generated_email, total_cost 
-            FROM sent_emails 
-            WHERE club_name = ?
-        ''', (club_name,))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            return True, {
-                'email_sent_date': result[0],
-                'personalized_content': result[1],
-                'generated_email': result[2],
-                'total_cost': result[3]
-            }
-        return False, None
+        try:
+            tracking_df = pd.read_csv(self.tracking_csv_path)
+            club_record = tracking_df[tracking_df['club_name'] == club_name]
+            
+            if not club_record.empty:
+                record = club_record.iloc[0]
+                return True, {
+                    'email_sent_date': record.get('email_sent_date', None),
+                    'personalized_content': record.get('personalized_content', ''),
+                    'generated_email': record.get('generated_email', ''),
+                    'total_cost': record.get('total_cost', 0.0)
+                }
+            return False, None
+        except FileNotFoundError:
+            return False, None
+        except Exception as e:
+            print(f"Error checking email status for {club_name}: {e}")
+            return False, None
     
     def research_club_with_o3(self, club_name: str, website: str = None, country: str = None) -> Tuple[str, Dict]:
         """Use O3 with web search to research club information"""
@@ -178,14 +230,21 @@ class EmailPersonalizer:
                 ]
             )
             
-            # Track costs
+            # Extract and track costs from API response
             if hasattr(response, 'usage') and response.usage:
-                cached_tokens = getattr(response.usage, 'prompt_tokens_cached', 0) if hasattr(response.usage, 'prompt_tokens_cached') else 0
-                cost_tracker.add_search_cost(
-                    response.usage.prompt_tokens,
-                    response.usage.completion_tokens,
-                    cached_tokens
-                )
+                usage = response.usage
+                input_tokens = getattr(usage, 'prompt_tokens', 0)
+                output_tokens = getattr(usage, 'completion_tokens', 0)
+                cached_tokens = getattr(usage, 'prompt_tokens_cached', 0)
+                
+                print(f"🔍 {SEARCH_MODEL} API Response Usage:")
+                print(f"   Raw input tokens: {input_tokens}")
+                print(f"   Raw output tokens: {output_tokens}")
+                print(f"   Raw cached tokens: {cached_tokens}")
+                
+                cost_tracker.add_search_cost(input_tokens, output_tokens, cached_tokens)
+            else:
+                print(f"⚠️ Warning: No usage information available from {SEARCH_MODEL} API response")
             
             research_result = response.choices[0].message.content.strip()
             
@@ -232,14 +291,21 @@ class EmailPersonalizer:
                 max_tokens=150
             )
             
-            # Track costs
+            # Extract and track costs from API response
             if hasattr(response, 'usage') and response.usage:
-                cached_tokens = getattr(response.usage, 'prompt_tokens_cached', 0) if hasattr(response.usage, 'prompt_tokens_cached') else 0
-                cost_tracker.add_content_cost(
-                    response.usage.prompt_tokens,
-                    response.usage.completion_tokens,
-                    cached_tokens
-                )
+                usage = response.usage
+                input_tokens = getattr(usage, 'prompt_tokens', 0)
+                output_tokens = getattr(usage, 'completion_tokens', 0)
+                cached_tokens = getattr(usage, 'prompt_tokens_cached', 0)
+                
+                print(f"✨ {CONTENT_MODEL} API Response Usage:")
+                print(f"   Raw input tokens: {input_tokens}")
+                print(f"   Raw output tokens: {output_tokens}")
+                print(f"   Raw cached tokens: {cached_tokens}")
+                
+                cost_tracker.add_content_cost(input_tokens, output_tokens, cached_tokens)
+            else:
+                print(f"⚠️ Warning: No usage information available from {CONTENT_MODEL} API response")
             
             personalized_content = response.choices[0].message.content.strip()
             
@@ -311,56 +377,65 @@ class EmailPersonalizer:
         return personalized_email, personalized_content, club_research, total_costs
     
     def save_generated_email(self, club_name: str, personalized_content: str, generated_email: str, costs: Dict, mark_as_sent: bool = False):
-        """Save generated email to database with cost tracking"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
+        """Save generated email to CSV with cost tracking"""
+        try:
+            tracking_df = pd.read_csv(self.tracking_csv_path)
+        except FileNotFoundError:
+            tracking_df = pd.DataFrame(columns=[
+                'club_name', 'email_sent_date', 'personalized_content', 
+                'generated_email', 'search_cost', 'content_cost', 
+                'web_search_cost', 'total_cost', 'created_at'
+            ])
         
         email_sent_date = datetime.now().isoformat() if mark_as_sent else None
+        created_at = datetime.now().isoformat()
         
-        cursor.execute('''
-            INSERT OR REPLACE INTO sent_emails 
-            (club_name, email_sent_date, personalized_content, generated_email, 
-             search_cost, content_cost, web_search_cost, total_cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (club_name, email_sent_date, personalized_content, generated_email,
-              costs['search_cost'], costs['content_cost'], costs['web_search_cost'], costs['total_cost']))
+        # Remove existing record if it exists
+        tracking_df = tracking_df[tracking_df['club_name'] != club_name]
         
-        conn.commit()
-        conn.close()
+        # Add new record
+        new_record = pd.DataFrame([{
+            'club_name': club_name,
+            'email_sent_date': email_sent_date,
+            'personalized_content': personalized_content,
+            'generated_email': generated_email,
+            'search_cost': costs['search_cost'],
+            'content_cost': costs['content_cost'],
+            'web_search_cost': costs['web_search_cost'],
+            'total_cost': costs['total_cost'],
+            'created_at': created_at
+        }])
+        
+        tracking_df = pd.concat([tracking_df, new_record], ignore_index=True)
+        tracking_df.to_csv(self.tracking_csv_path, index=False)
         
         print(f"💾 Email saved for {club_name} (Cost: ${costs['total_cost']:.4f})" + (" and marked as sent" if mark_as_sent else ""))
     
     def mark_email_as_sent(self, club_name: str):
         """Mark an email as sent"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE sent_emails 
-            SET email_sent_date = ? 
-            WHERE club_name = ?
-        ''', (datetime.now().isoformat(), club_name))
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"📤 Email marked as sent for {club_name}")
+        try:
+            tracking_df = pd.read_csv(self.tracking_csv_path)
+            tracking_df.loc[tracking_df['club_name'] == club_name, 'email_sent_date'] = datetime.now().isoformat()
+            tracking_df.to_csv(self.tracking_csv_path, index=False)
+            print(f"📤 Email marked as sent for {club_name}")
+        except Exception as e:
+            print(f"Error marking email as sent for {club_name}: {e}")
     
     def get_all_clubs_status(self) -> pd.DataFrame:
         """Get status of all clubs with cost information"""
         clubs_df = self.load_clubs_data()
         
-        conn = sqlite3.connect(self.db_path)
-        sent_emails_df = pd.read_sql_query('''
-            SELECT club_name, email_sent_date, total_cost,
-                   CASE WHEN email_sent_date IS NOT NULL THEN 'Sent' ELSE 'Generated' END as status
-            FROM sent_emails
-        ''', conn)
-        conn.close()
+        try:
+            tracking_df = pd.read_csv(self.tracking_csv_path)
+            tracking_df['status'] = tracking_df['email_sent_date'].apply(
+                lambda x: 'Sent' if pd.notna(x) else 'Generated'
+            )
+        except FileNotFoundError:
+            tracking_df = pd.DataFrame(columns=['club_name', 'email_sent_date', 'total_cost', 'status'])
         
         # Merge with clubs data
         status_df = clubs_df.merge(
-            sent_emails_df, 
+            tracking_df[['club_name', 'email_sent_date', 'total_cost', 'status']], 
             left_on='Club', 
             right_on='club_name', 
             how='left'
@@ -374,29 +449,24 @@ class EmailPersonalizer:
     
     def get_total_costs(self) -> Dict[str, float]:
         """Get total costs across all generated emails"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT 
-                SUM(search_cost) as total_search_cost,
-                SUM(content_cost) as total_content_cost,
-                SUM(web_search_cost) as total_web_search_cost,
-                SUM(total_cost) as total_cost,
-                COUNT(*) as total_emails
-            FROM sent_emails
-        ''')
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        return {
-            'search_cost': result[0] or 0.0,
-            'content_cost': result[1] or 0.0,
-            'web_search_cost': result[2] or 0.0,
-            'total_cost': result[3] or 0.0,
-            'total_emails': result[4] or 0
-        }
+        try:
+            tracking_df = pd.read_csv(self.tracking_csv_path)
+            
+            return {
+                'search_cost': tracking_df['search_cost'].sum(),
+                'content_cost': tracking_df['content_cost'].sum(),
+                'web_search_cost': tracking_df['web_search_cost'].sum(),
+                'total_cost': tracking_df['total_cost'].sum(),
+                'total_emails': len(tracking_df)
+            }
+        except FileNotFoundError:
+            return {
+                'search_cost': 0.0,
+                'content_cost': 0.0,
+                'web_search_cost': 0.0,
+                'total_cost': 0.0,
+                'total_emails': 0
+            }
 
 
 if __name__ == "__main__":

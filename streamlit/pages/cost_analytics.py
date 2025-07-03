@@ -44,7 +44,7 @@ def cost_analytics_page(personalizer):
                 st.caption(f"{search_percentage:.1f}% of total cost")
         
         with col2:
-            st.metric("✨ GPT-4o-mini Content", f"${total_costs['content_cost']:.6f}")
+            st.metric("✨ GPT-4.1-nano Content", f"${total_costs['content_cost']:.6f}")
             if total_costs['total_cost'] > 0:
                 content_percentage = (total_costs['content_cost'] / total_costs['total_cost']) * 100
                 st.caption(f"{content_percentage:.1f}% of total cost")
@@ -60,14 +60,14 @@ def cost_analytics_page(personalizer):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**O3-mini Pricing:**")
-            st.info(f"• Input: ${PRICING['o3-mini']['input']:.2f} per 1M tokens\n• Output: ${PRICING['o3-mini']['output']:.2f} per 1M tokens")
+            st.markdown("**O3 Pricing:**")
+            st.info(f"• Input: ${PRICING['o3']['input']:.2f} per 1M tokens\n• Cached Input: ${PRICING['o3']['cached_input']:.2f} per 1M tokens\n• Output: ${PRICING['o3']['output']:.2f} per 1M tokens")
         
         with col2:
-            st.markdown("**GPT-4o-mini Pricing:**")
-            st.info(f"• Input: ${PRICING['gpt-4o-mini']['input']:.2f} per 1M tokens\n• Output: ${PRICING['gpt-4o-mini']['output']:.2f} per 1M tokens")
+            st.markdown("**GPT-4.1-nano Pricing:**")
+            st.info(f"• Input: ${PRICING['gpt-4.1-nano']['input']:.3f} per 1M tokens\n• Cached Input: ${PRICING['gpt-4.1-nano']['cached_input']:.3f} per 1M tokens\n• Output: ${PRICING['gpt-4.1-nano']['output']:.3f} per 1M tokens")
         
-        st.info(f"🌐 **Web Search Cost:** ${WEB_SEARCH_COST_PER_QUERY:.3f} per query")
+        st.info(f"🌐 **Web Search Cost:** ${WEB_SEARCH_COST_PER_QUERY:.3f} per query (${WEB_SEARCH_COST_PER_1K_CALLS:.2f} per 1K calls)")
         
         # Detailed cost analysis from database
         st.subheader("📋 Detailed Cost Analysis")
@@ -101,7 +101,7 @@ def cost_analytics_page(personalizer):
             
             # Rename columns for better display
             display_df.columns = [
-                'Club Name', 'O3 Search Cost', 'GPT-4o-mini Cost', 
+                'Club Name', 'O3 Search Cost', 'GPT-4.1-nano Cost', 
                 'Web Search Cost', 'Total Cost', 'Created At', 'Status'
             ]
             
@@ -174,7 +174,7 @@ def cost_analytics_page(personalizer):
                 tips.append("🔍 **O3 Search costs are high** - Consider optimizing search prompts for efficiency")
             
             if content_ratio > 0.3:
-                tips.append("✨ **GPT-4o-mini costs are significant** - Review content generation prompts for conciseness")
+                tips.append("✨ **GPT-4.1-nano costs are significant** - Review content generation prompts for conciseness")
             
             if web_ratio > 0.2:
                 tips.append("🌐 **Web search costs are notable** - Consider caching search results for similar clubs")
