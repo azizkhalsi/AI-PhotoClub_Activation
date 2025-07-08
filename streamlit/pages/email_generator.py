@@ -3,7 +3,7 @@ import sys
 import os
 
 def email_generator_page(personalizer):
-    """Email generation page with cost tracking"""
+    """Email generation page focused on core functionality"""
     st.header("📧 Generate Personalized Email")
     
     # Load clubs data
@@ -42,147 +42,212 @@ def email_generator_page(personalizer):
         if email_exists:
             st.success("✅ Email already generated for this club!")
             
-            # Show cost and status
-            col1, col2 = st.columns(2)
-            with col1:
-                if email_data['email_sent_date']:
-                    st.info(f"📤 **Status:** Sent on {email_data['email_sent_date'][:10]}")
+            # Show status with proper date handling
+            if email_data.get('email_sent_date') and str(email_data['email_sent_date']) != 'nan':
+                # Safely handle the date formatting
+                date_str = str(email_data['email_sent_date'])
+                if len(date_str) >= 10:
+                    st.info(f"📤 **Status:** Sent on {date_str[:10]}")
+                else:
+                    st.info(f"📤 **Status:** Sent on {date_str}")
+            else:
+                # Show generation date instead of "up to date" message
+                if email_data.get('created_at'):
+                    creation_date = str(email_data['created_at'])
+                    if len(creation_date) >= 10:
+                        st.info(f"📝 **Generated on:** {creation_date[:10]}")
+                    else:
+                        st.info(f"📝 **Generated on:** {creation_date}")
                 else:
                     st.warning("📝 **Status:** Generated but not sent")
             
-            with col2:
-                if email_data.get('total_cost'):
-                    st.metric("💰 Generation Cost", f"${email_data['total_cost']:.4f}")
-                else:
-                    st.info("💰 Cost not tracked")
+            # Email editing section
+            st.markdown("### 📝 Email Content")
             
-            # Show existing email
-            with st.expander("📄 View Generated Email", expanded=True):
-                st.text_area(
-                    "Generated Email:",
-                    value=email_data['generated_email'],
-                    height=400,
-                    disabled=True
-                )
+            # Initialize session state for email editing
+            if f"email_content_{selected_club}" not in st.session_state:
+                st.session_state[f"email_content_{selected_club}"] = email_data['generated_email']
+                st.session_state[f"original_email_{selected_club}"] = email_data['generated_email']
             
-            # Action buttons
-            col1, col2, col3 = st.columns(3)
+            # Check if email has been modified
+            is_modified = st.session_state[f"email_content_{selected_club}"] != st.session_state[f"original_email_{selected_club}"]
+            
+            # Email editor with modification indicator
+            if is_modified:
+                st.warning("✏️ **Email has been modified** - Don't forget to save your changes!")
+            
+            edited_email = st.text_area(
+                "Email Content:",
+                value=st.session_state[f"email_content_{selected_club}"],
+                height=400,
+                key=f"email_editor_{selected_club}",
+                help="Edit the email content as needed."
+            )
+            
+            # Update session state when text area changes
+            st.session_state[f"email_content_{selected_club}"] = edited_email
+            
+            # Action buttons with better layout (removed "✅ Sent" button)
+            col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
             
             with col1:
-                if st.button("🔄 Regenerate Email", type="secondary"):
-                    regenerate_email(personalizer, selected_club)
+                if st.button("💾 Save Changes", type="primary", disabled=not is_modified, help="Save your email modifications"):
+                    save_email_changes(personalizer, selected_club, edited_email)
             
             with col2:
-                if not email_data['email_sent_date']:
-                    if st.button("📤 Mark as Sent", type="primary"):
-                        personalizer.mark_email_as_sent(selected_club)
-                        st.success("Email marked as sent!")
-                        st.rerun()
+                if st.button("↩️ Undo", type="secondary", disabled=not is_modified, help="Revert to original email"):
+                    st.session_state[f"email_content_{selected_club}"] = st.session_state[f"original_email_{selected_club}"]
+                    st.rerun()
             
             with col3:
-                if st.button("📋 Copy Email", type="secondary"):
-                    st.code(email_data['generated_email'])
-                    st.info("📋 Email content displayed above for copying!")
+                if st.button("🗑️ Delete", type="secondary", help="Delete this email record"):
+                    delete_email_record(personalizer, selected_club)
+            
+            with col4:
+                if st.button("🔄 Regenerate", type="secondary", help="Generate a completely new email"):
+                    regenerate_email(personalizer, selected_club)
+            
+            # Mark as sent button (only show if not already sent)
+            if not email_data.get('email_sent_date') or str(email_data.get('email_sent_date')) == 'nan':
+                if st.button("📤 Mark as Sent", type="primary", help="Mark email as sent"):
+                    personalizer.mark_email_as_sent(selected_club)
+                    st.success("✅ Email marked as sent!")
+                    st.rerun()
+            
+            # Copy section
+            if st.button("📋 Copy to Clipboard", help="Copy email content for external use"):
+                st.code(edited_email, language="text")
+                st.success("📋 Email content displayed above - you can now copy it!")
         
         else:
             st.info("🆕 No email generated yet for this club.")
-            
-            # Estimated cost display
-            st.markdown("### 💰 Estimated Costs")
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("O3 Search", "~$0.002-0.010")
-            with col2:
-                st.metric("GPT-4.1-nano Content", "~$0.0001-0.0005")
-            with col3:
-                st.metric("Web Search", "$0.010")
-            with col4:
-                st.metric("Total Est.", "~$0.0121-0.0156")
             
             # Generate new email
             if st.button("🚀 Generate Personalized Email", type="primary"):
                 generate_new_email(personalizer, selected_club)
 
 def generate_new_email(personalizer, club_name):
-    """Generate a new personalized email with cost tracking"""
+    """Generate a new personalized email with simplified progress tracking"""
     try:
-        with st.spinner(f"🔍 Step 1/3: Researching {club_name} with O3..."):
+        with st.spinner(f"🔍 Researching {club_name} and generating email..."):
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            status_text.text("🔍 Researching club with O3 and web search...")
+            status_text.text("🔍 Researching club...")
             progress_bar.progress(33)
             
             email, content, research, costs = personalizer.generate_personalized_email(club_name)
             
-            status_text.text("✨ Generated personalized content with GPT-4.1-nano...")
+            status_text.text("✨ Generating personalized content...")
             progress_bar.progress(66)
             
             personalizer.save_generated_email(club_name, content, email, costs)
             
-            status_text.text("💾 Saving email to database...")
+            status_text.text("💾 Saving email...")
             progress_bar.progress(100)
         
         st.success("✅ Email generated successfully!")
         
-        # Show cost breakdown
-        st.markdown("### 💰 Generation Costs")
-        col1, col2, col3, col4 = st.columns(4)
+        # Initialize session state for the new email
+        st.session_state[f"email_content_{club_name}"] = email
+        st.session_state[f"original_email_{club_name}"] = email
+        
+        # Show the generated email with editing capabilities
+        st.markdown("### 📧 Generated Email")
+        
+        edited_new_email = st.text_area(
+            "Email Content:",
+            value=email,
+            height=400,
+            key=f"new_email_editor_{club_name}",
+            help="You can edit the generated email before marking it as sent."
+        )
+        
+        # Update session state
+        st.session_state[f"email_content_{club_name}"] = edited_new_email
+        
+        # Action buttons for new email
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.metric("🔍 O3 Search", f"${costs['search_cost']:.6f}")
-        with col2:
-            st.metric("✨ GPT-4.1-nano Content", f"${costs['content_cost']:.6f}")
-        with col3:
-            st.metric("🌐 Web Search", f"${costs['web_search_cost']:.6f}")
-        with col4:
-            st.metric("📊 Total Cost", f"${costs['total_cost']:.6f}")
-        
-        # Show the generated email
-        st.subheader("📧 Generated Email")
-        st.text_area("Email Content:", value=email, height=400, disabled=True)
-        
-        # Show research and personalization details
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            with st.expander("🔍 O3 Research Summary"):
-                st.write(research)
-        
-        with col2:
-            with st.expander("✨ GPT-4.1-nano Personalized Content"):
-                st.write(content)
-        
-        # Action buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📤 Mark as Sent", key="mark_sent_new"):
-                personalizer.mark_email_as_sent(club_name)
-                st.success("Email marked as sent!")
+            if st.button("💾 Save Changes", key="save_new", type="primary"):
+                save_email_changes(personalizer, club_name, edited_new_email)
         
         with col2:
             if st.button("📋 Copy Email", key="copy_new"):
-                st.code(email)
-                st.info("📋 Email content displayed above for copying!")
+                st.code(edited_new_email, language="text")
+                st.success("📋 Email content displayed above!")
         
-        # Refresh the page to show updated status
+        with col3:
+            if st.button("📤 Mark as Sent", key="mark_sent_new", type="primary"):
+                personalizer.mark_email_as_sent(club_name)
+                st.success("✅ Email marked as sent!")
+                st.rerun()
+        
         st.rerun()
         
     except Exception as e:
-        st.error(f"❌ Error generating email: {e}")
-        if "model" in str(e).lower():
-            st.info("💡 Note: Make sure you have access to the O3 model. You can update the models in the .env file.")
+        st.error(f"Error generating email: {e}")
+
+def save_email_changes(personalizer, club_name, modified_email, show_success=True):
+    """Save modified email content"""
+    try:
+        # Update the email content in the database
+        result = personalizer.save_email_modification(club_name, modified_email)
+        
+        if result:
+            # Update the session state to reflect saved changes
+            st.session_state[f"original_email_{club_name}"] = modified_email
+            if show_success:
+                st.success("✅ Email changes saved successfully!")
+        else:
+            st.error("❌ Failed to save email changes")
+            
+    except Exception as e:
+        st.error(f"Error saving email changes: {e}")
+
+def delete_email_record(personalizer, club_name):
+    """Delete email record with confirmation"""
+    # Show confirmation dialog
+    if st.button("⚠️ Confirm Delete", type="secondary", key="confirm_delete"):
+        try:
+            success = personalizer.delete_email_record(club_name)
+            if success:
+                # Clear session state for this club
+                keys_to_remove = [key for key in st.session_state.keys() if club_name in key]
+                for key in keys_to_remove:
+                    del st.session_state[key]
+                
+                st.success("✅ Email record deleted successfully!")
+                st.rerun()
+            else:
+                st.error("❌ Failed to delete email record")
+        except Exception as e:
+            st.error(f"Error deleting email record: {e}")
+    
+    else:
+        st.warning("⚠️ Click 'Confirm Delete' to permanently delete this email record")
 
 def regenerate_email(personalizer, club_name):
-    """Regenerate email for a club"""
-    try:
-        with st.spinner(f"🔄 Regenerating email for {club_name}..."):
-            email, content, research, costs = personalizer.generate_personalized_email(club_name)
-            personalizer.save_generated_email(club_name, content, email, costs, mark_as_sent=False)
-        
-        st.success("✅ Email regenerated successfully!")
-        st.info(f"💰 New generation cost: ${costs['total_cost']:.6f}")
-        st.rerun()
-        
-    except Exception as e:
-        st.error(f"❌ Error regenerating email: {e}") 
+    """Regenerate email with confirmation"""
+    # Show confirmation dialog
+    if st.button("⚠️ Confirm Regenerate", type="secondary", key="confirm_regen"):
+        try:
+            # Delete existing email first
+            personalizer.delete_email_record(club_name)
+            
+            # Clear session state
+            keys_to_remove = [key for key in st.session_state.keys() if club_name in key]
+            for key in keys_to_remove:
+                del st.session_state[key]
+            
+            st.success("✅ Existing email deleted. Generating new email...")
+            
+            # Generate new email
+            generate_new_email(personalizer, club_name)
+            
+        except Exception as e:
+            st.error(f"Error regenerating email: {e}")
+    
+    else:
+        st.warning("⚠️ Click 'Confirm Regenerate' to create a completely new email (this will delete the current one)") 

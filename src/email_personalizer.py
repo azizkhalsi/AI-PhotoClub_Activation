@@ -199,33 +199,50 @@ class EmailPersonalizer:
         if website:
             search_query += f" site:{website}"
             
-        # Create a search prompt for O3 (no temperature/max_tokens as requested)
+        # Create a detailed search prompt for O3 with web search capabilities
         search_prompt = f"""
-        You are a research assistant with web search capabilities. Research the photography club "{club_name}" and provide a comprehensive summary.
+        You are a research assistant with web search capabilities. I need you to search the web and find specific, current information about the photography club "{club_name}".
 
-        Focus on finding:
-        1. Their main activities and specialties
-        2. Notable achievements, awards, or recognition
-        3. Community involvement or special events they organize
-        4. Unique characteristics that make them stand out
-        5. Recent news or activities
-        6. Their photography focus areas (landscape, portrait, street, etc.)
+        **IMPORTANT: Use web search to find real, current information about this specific club.**
+
+        Search for and provide specific details about:
+        1. **Recent Activities:** Latest exhibitions, photo walks, workshops, or competitions they've organized (with dates if possible)
+        2. **Upcoming Events:** Any announced future events, meetings, or special projects
+        3. **Photography Specialties:** What types of photography they focus on (landscape, portrait, street, wildlife, macro, etc.)
+        4. **Notable Achievements:** Recent awards, recognition, or member accomplishments
+        5. **Unique Characteristics:** What makes this club special or different from others
+        6. **Community Projects:** Any community involvement, charity work, or local partnerships
+        7. **Member Highlights:** Featured photographers or notable member work
+        8. **Club History:** Founding date, milestones, or significant moments
         
-        Club details:
+        Club details to help your search:
         - Name: {club_name}
         - Country: {country if country else 'Unknown'}
         - Website: {website if website else 'Not provided'}
         
-        Please provide a detailed research summary that will be used to personalize an email. Include specific details that would show genuine knowledge of the club.
+        **CRITICAL:** Please search the web for this specific club and provide concrete findings. Don't provide generic information - I need specific details that prove genuine knowledge of this particular club.
         
-        If you cannot find specific information about this club, provide general information about photography clubs in that region and mention that you'd like to learn more about their specific activities.
+        Format your response as:
+        **SPECIFIC FINDINGS:**
+        [List concrete facts you found about this club]
+        
+        **RECENT ACTIVITIES:**
+        [Recent events, exhibitions, or activities with dates]
+        
+        **CLUB SPECIALTIES:**
+        [Their photography focus areas and unique characteristics]
+        
+        **PERSONALIZATION ANGLE:**
+        [Specific aspect that would make a good personalization hook for an email]
+        
+        If you cannot find specific information about this exact club, clearly state that and provide what general information you can find about photography clubs in their region, but be honest about the limitations.
         """
         
         try:
             response = self.openai_client.chat.completions.create(
                 model=SEARCH_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a research assistant specializing in photography clubs and communities. Use web search to find accurate, current information about photography clubs."},
+                    {"role": "system", "content": "You are a research assistant with web search capabilities. You must search the internet to find specific, current information about photography clubs and communities. Always use web search to find real, up-to-date information rather than relying on training data. Focus on finding concrete details like recent events, specific activities, and unique characteristics of each club."},
                     {"role": "user", "content": search_prompt}
                 ]
             )
@@ -238,9 +255,9 @@ class EmailPersonalizer:
                 cached_tokens = getattr(usage, 'prompt_tokens_cached', 0)
                 
                 print(f"🔍 {SEARCH_MODEL} API Response Usage:")
-                print(f"   Raw input tokens: {input_tokens}")
-                print(f"   Raw output tokens: {output_tokens}")
-                print(f"   Raw cached tokens: {cached_tokens}")
+                print(f"   Input tokens: {input_tokens}")
+                print(f"   Output tokens: {output_tokens}")
+                print(f"   Cached tokens: {cached_tokens}")
                 
                 cost_tracker.add_search_cost(input_tokens, output_tokens, cached_tokens)
             else:
@@ -252,68 +269,78 @@ class EmailPersonalizer:
             
         except Exception as e:
             print(f"Error researching club {club_name} with O3: {e}")
-            fallback_result = f"I understand that {club_name} is an active photography community focused on developing photographic skills and fostering creativity among its members."
+            fallback_result = f"""
+            **SPECIFIC FINDINGS:**
+            Unable to find specific current information about {club_name} due to research limitations.
+            
+            **RECENT ACTIVITIES:**
+            No specific recent activities found.
+            
+            **CLUB SPECIALTIES:**
+            General photography club activities assumed based on location: {country if country else 'Unknown region'}
+            
+            **PERSONALIZATION ANGLE:**
+            Focus on general photography community support and learning more about their specific activities.
+            """
             return fallback_result, cost_tracker.get_costs()
     
-    def generate_personalized_content_with_gpt4(self, club_name: str, club_research: str) -> Tuple[str, Dict]:
-        """Generate personalized content using GPT-4.1-nano based on O3 research"""
+    def generate_personalized_content(self, club_name: str, club_research: str) -> Tuple[str, Dict]:
+        """Generate ONLY the personalized addition (1-2 sentences) using GPT-4.1-nano"""
         
         cost_tracker = CostTracker()
         
-        personalization_prompt = f"""
-        Based on the detailed research about "{club_name}", create a personalized and engaging sentence or two that will be inserted after "I'm Killian, part of the Partnerships team at DxO Labs, the creators of award-winning photo editing software like DxO PhotoLab and Nik Collection."
+        content_prompt = f"""
+        You are writing a personalized addition for a professional marketing email from DxO Labs to a photography club.
 
-        Research findings:
+        **CLUB RESEARCH:**
         {club_research}
 
-        Your task is to create a natural, conversational transition that:
-        1. Shows genuine knowledge about their specific club
-        2. Mentions something concrete about their activities, achievements, or specialties
-        3. Connects how DxO's professional editing software can enhance their members' work
-        4. Feels personal and authentic, not generic
-        5. Is concise but impactful (1-2 sentences maximum)
+        **YOUR TASK:**
+        Generate ONLY 1-2 personalized sentences that will be inserted after this line in the email:
+        "I'm Killian, part of the Partnerships team at DxO Labs, the creators of award-winning photo editing software like DxO PhotoLab and Nik Collection."
 
-        Examples of good personalization:
-        - "I came across your recent landscape photography exhibition and was impressed by the technical quality of the work displayed. I believe DxO PhotoLab's advanced noise reduction and lens corrections could help your members achieve even more professional results in challenging lighting conditions."
-        - "I noticed your club's focus on wildlife photography and the amazing shots from your recent field trips to [location]. Our Nik Collection's specialized filters could really enhance the dramatic impact of those nature captures your members are creating."
+        **REQUIREMENTS:**
+        - Start with "I read about..." or "I came across..." or "I noticed..." or "I was impressed by..."
+        - Reference specific research findings about {club_name}
+        - Connect to DxO's software benefits naturally
+        - Be professional and confident
+        - Maximum 2 sentences
+        - Return ONLY the personalized sentences, nothing else
 
-        Generate a personalized message that sounds like it comes from someone who has genuinely researched and understands this specific club.
+        **EXAMPLE OUTPUT:**
+        "I read about your recent 'Urban Nights' exhibition and was impressed by the technical challenges your members tackled with low-light street photography. I believe DxO PhotoLab's industry-leading noise reduction could help your photographers push those ISO limits even further."
+
+        **GENERATE ONLY THE PERSONALIZED SENTENCES:**
         """
         
         try:
             response = self.openai_client.chat.completions.create(
                 model=CONTENT_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are an expert at writing personalized, genuine partnership outreach messages. Create content that demonstrates real knowledge and interest in the recipient's work."},
-                    {"role": "user", "content": personalization_prompt}
+                    {"role": "system", "content": "You are a professional marketing specialist for DxO Labs creating personalized content for photography club outreach. Generate ONLY the requested personalized sentences, nothing else. Do not include any email template or other content."},
+                    {"role": "user", "content": content_prompt}
                 ],
                 temperature=0.8,
-                max_tokens=150
+                max_tokens=200
             )
             
-            # Extract and track costs from API response
+            # Track costs
             if hasattr(response, 'usage') and response.usage:
                 usage = response.usage
                 input_tokens = getattr(usage, 'prompt_tokens', 0)
                 output_tokens = getattr(usage, 'completion_tokens', 0)
                 cached_tokens = getattr(usage, 'prompt_tokens_cached', 0)
                 
-                print(f"✨ {CONTENT_MODEL} API Response Usage:")
-                print(f"   Raw input tokens: {input_tokens}")
-                print(f"   Raw output tokens: {output_tokens}")
-                print(f"   Raw cached tokens: {cached_tokens}")
-                
                 cost_tracker.add_content_cost(input_tokens, output_tokens, cached_tokens)
-            else:
-                print(f"⚠️ Warning: No usage information available from {CONTENT_MODEL} API response")
             
             personalized_content = response.choices[0].message.content.strip()
+            print(f"✨ Generated personalized content for {club_name}: {len(personalized_content)} characters")
             
             return personalized_content, cost_tracker.get_costs()
             
         except Exception as e:
-            print(f"Error generating personalized content for {club_name}: {e}")
-            fallback_content = f"I heard about {club_name} and your commitment to advancing photography skills in your community. I think our professional-grade editing tools could really benefit your members' creative work."
+            print(f"❌ Error generating personalized content for {club_name}: {e}")
+            fallback_content = f"I came across {club_name} and was impressed by your photography community's dedication to advancing the art of photography. I'd love to explore how DxO's professional editing tools could support your members' creative work."
             return fallback_content, cost_tracker.get_costs()
     
     def generate_personalized_email(self, club_name: str) -> Tuple[str, str, str, Dict]:
@@ -347,37 +374,114 @@ class EmailPersonalizer:
         
         # Step 2: Generate personalized content with GPT-4.1-nano
         print(f"✨ Generating personalized content with GPT-4.1-nano...")
-        personalized_content, content_costs = self.generate_personalized_content_with_gpt4(club_name, club_research)
+        personalized_content, content_costs = self.generate_personalized_content(club_name, club_research)
         
         # Add content costs to total
         for cost_type, cost_value in content_costs.items():
             total_costs[cost_type] += cost_value
         
-        # Step 3: Load and modify email template
+        # Step 3: Load email template and combine
+        print(f"📧 Combining template with personalized content...")
         template = self.load_email_template()
         if not template:
             raise ValueError("Could not load email template")
         
-        # Replace placeholders
-        personalized_email = template.replace("{{Company name}}", club_name)
+        # Combine template with personalized content
+        complete_email = self.combine_email_with_personalization(template, personalized_content, club_name)
         
-        # Insert personalized content after the Killian introduction
+        print(f"✅ Email generation completed for {club_name}")
+        print(f"📝 Personalized content: {personalized_content[:100]}...")
+        print(f"📧 Complete email length: {len(complete_email)} characters")
+        print(f"💰 Total cost: ${total_costs['total_cost']:.4f}")
+        
+        return complete_email, personalized_content, club_research, total_costs
+    
+    def combine_email_with_personalization(self, template: str, personalized_content: str, club_name: str) -> str:
+        """Combine the email template with personalized content"""
+        
+        # Replace club name placeholder
+        email = template.replace("{{Company name}}", club_name)
+        
+        # Look for the exact pattern from the template
         killian_line = "I'm Killian, part of the Partnerships team at DxO Labs, the creators of award-winning photo editing software like DxO PhotoLab and Nik Collection."
         
-        if killian_line in personalized_email:
-            insertion_point = personalized_email.find(killian_line) + len(killian_line)
-            personalized_email = (
-                personalized_email[:insertion_point] + 
-                f"\n\n{personalized_content}" + 
-                personalized_email[insertion_point:]
-            )
+        killian_position = email.find(killian_line)
         
-        print(f"💰 Total cost for {club_name}: ${total_costs['total_cost']:.4f}")
+        if killian_position != -1:
+            # Find the end of this line
+            killian_end = killian_position + len(killian_line)
+            
+            # Look for the pattern after Killian's line: should be "\n\nWe're offering"
+            next_section_start = email.find("\n\nWe're offering", killian_end)
+            
+            if next_section_start != -1:
+                # Insert personalized content between Killian's line and "We're offering..."
+                combined_email = (
+                    email[:killian_end] + 
+                    f"\n\n{personalized_content}" + 
+                    email[next_section_start:]
+                )
+                print(f"✅ Successfully inserted personalized content after Killian's introduction")
+                return combined_email
+            else:
+                # Fallback: look for any double newline after Killian's line
+                next_paragraph = email.find("\n\n", killian_end)
+                if next_paragraph != -1:
+                    combined_email = (
+                        email[:killian_end] + 
+                        f"\n\n{personalized_content}" + 
+                        email[next_paragraph:]
+                    )
+                    print(f"✅ Inserted personalized content at next paragraph break")
+                    return combined_email
         
-        return personalized_email, personalized_content, club_research, total_costs
+        # Enhanced fallback with more precise insertion
+        print(f"⚠️ Could not find exact Killian line, trying partial match...")
+        
+        # Try to find just the start of Killian's introduction
+        killian_start = email.find("I'm Killian, part of the Partnerships team")
+        if killian_start != -1:
+            # Find the end of the sentence (look for period followed by space or newline)
+            sentence_end = email.find(".", killian_start)
+            while sentence_end != -1 and sentence_end < len(email) - 1:
+                if email[sentence_end + 1] in [' ', '\n']:
+                    break
+                sentence_end = email.find(".", sentence_end + 1)
+            
+            if sentence_end != -1:
+                # Look for next paragraph after this sentence
+                next_paragraph = email.find("\n\n", sentence_end)
+                if next_paragraph != -1:
+                    combined_email = (
+                        email[:sentence_end + 1] + 
+                        f"\n\n{personalized_content}" + 
+                        email[next_paragraph:]
+                    )
+                    print(f"✅ Inserted personalized content after partial Killian match")
+                    return combined_email
+        
+        # Final fallback: Insert after the first paragraph that contains "DxO Labs"
+        dxo_mention = email.find("DxO Labs")
+        if dxo_mention != -1:
+            next_paragraph = email.find("\n\n", dxo_mention)
+            if next_paragraph != -1:
+                combined_email = (
+                    email[:next_paragraph] + 
+                    f"\n\n{personalized_content}" + 
+                    email[next_paragraph:]
+                )
+                print(f"✅ Inserted personalized content after DxO Labs mention")
+                return combined_email
+        
+        # Last resort: append at the end
+        print(f"❌ All insertion attempts failed, appending at end")
+        return email + f"\n\n{personalized_content}"
     
     def save_generated_email(self, club_name: str, personalized_content: str, generated_email: str, costs: Dict, mark_as_sent: bool = False):
         """Save generated email to CSV with cost tracking"""
+        
+        print(f"💾 Saving email for {club_name}...")
+        
         try:
             tracking_df = pd.read_csv(self.tracking_csv_path)
         except FileNotFoundError:
@@ -397,8 +501,8 @@ class EmailPersonalizer:
         new_record = pd.DataFrame([{
             'club_name': club_name,
             'email_sent_date': email_sent_date,
-            'personalized_content': personalized_content,
-            'generated_email': generated_email,
+            'personalized_content': personalized_content,  # Only the personalized addition
+            'generated_email': generated_email,  # Complete email with personalization
             'search_cost': costs['search_cost'],
             'content_cost': costs['content_cost'],
             'web_search_cost': costs['web_search_cost'],
@@ -409,8 +513,11 @@ class EmailPersonalizer:
         tracking_df = pd.concat([tracking_df, new_record], ignore_index=True)
         tracking_df.to_csv(self.tracking_csv_path, index=False)
         
-        print(f"💾 Email saved for {club_name} (Cost: ${costs['total_cost']:.4f})" + (" and marked as sent" if mark_as_sent else ""))
+        print(f"✅ Email saved for {club_name} (Cost: ${costs['total_cost']:.4f})" + (" and marked as sent" if mark_as_sent else ""))
+        print(f"📝 Personalized content saved: {len(personalized_content)} characters")
+        print(f"📧 Complete email saved: {len(generated_email)} characters")
     
+
     def mark_email_as_sent(self, club_name: str):
         """Mark an email as sent"""
         try:
@@ -473,23 +580,32 @@ if __name__ == "__main__":
     # Example usage
     personalizer = EmailPersonalizer()
     
-    # Test with a specific club
-    test_club = "BOISE CAMERA CLUB"
+    # Test with AUSTRALIAN PHOTOGRAPHIC SOCIETY
+    test_club = "AUSTRALIAN PHOTOGRAPHIC SOCIETY"
+    
+    print(f"🚀 Running email generation for: {test_club}")
+    print("=" * 60)
     
     try:
         email, content, research, costs = personalizer.generate_personalized_email(test_club)
-        print(f"\n=== Generated Email for {test_club} ===")
-        print(email)
-        print(f"\n=== Research Summary ===")
-        print(research)
-        print(f"\n=== Personalized Content ===")
-        print(content)
-        print(f"\n=== Costs ===")
+        
+        print(f"\n=== RESULTS FOR {test_club} ===")
+        print(f"\n📝 Personalized Content Generated:")
+        print(f"'{content}'")
+        print(f"\n📧 Complete Email (first 500 chars):")
+        print(email[:500] + "..." if len(email) > 500 else email)
+        print(f"\n🔍 Research Summary:")
+        print(research[:300] + "..." if len(research) > 300 else research)
+        print(f"\n💰 Costs Breakdown:")
         for cost_type, cost_value in costs.items():
-            print(f"{cost_type}: ${cost_value:.4f}")
+            print(f"  {cost_type}: ${cost_value:.4f}")
         
         # Save the generated email
         personalizer.save_generated_email(test_club, content, email, costs)
         
+        print(f"\n✅ Email generation and saving completed for {test_club}")
+        
     except Exception as e:
-        print(f"Error: {e}") 
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc() 

@@ -15,6 +15,9 @@ CLUBS_CSV_PATH = os.getenv('CLUBS_CSV_PATH', 'test_results_20250701_092437.csv')
 # Email Template Configuration
 EMAIL_TEMPLATE_PATH = os.getenv('EMAIL_TEMPLATE_PATH', 'Introduction Email')
 
+# Database Configuration
+DATABASE_PATH = os.getenv('DATABASE_PATH', 'email_tracking.db')
+
 # Streamlit Configuration
 APP_TITLE = "Photo Club Email Personalization Tool"
 APP_DESCRIPTION = "Generate personalized emails for photography clubs using AI with cost tracking"

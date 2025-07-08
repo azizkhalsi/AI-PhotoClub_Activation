@@ -8,9 +8,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.email_personalizer import EmailPersonalizer
 from src.config import *
 from pages.email_generator import email_generator_page
-from pages.club_status import club_status_page
-from pages.settings import settings_page
-from pages.cost_analytics import cost_analytics_page
 
 # Page configuration
 st.set_page_config(
@@ -52,41 +49,13 @@ def main():
         st.error("Could not initialize the application. Please check your configuration.")
         st.stop()
     
-    # Sidebar for navigation
-    st.sidebar.title("🧭 Navigation")
-    
-    # Show cost summary in sidebar
-    try:
-        total_costs = personalizer.get_total_costs()
-        st.sidebar.markdown("### 💰 Cost Summary")
-        st.sidebar.metric("Total Cost", f"${total_costs['total_cost']:.4f}")
-        st.sidebar.metric("Emails Generated", total_costs['total_emails'])
-        if total_costs['total_emails'] > 0:
-            avg_cost = total_costs['total_cost'] / total_costs['total_emails']
-            st.sidebar.metric("Avg Cost/Email", f"${avg_cost:.4f}")
-    except Exception as e:
-        st.sidebar.error(f"Error loading cost summary: {e}")
-    
-    # Navigation
-    page = st.sidebar.selectbox(
-        "Choose a page:",
-        ["📧 Generate Email", "📊 Club Status Dashboard", "💰 Cost Analytics", "⚙️ Settings"]
-    )
-    
-    # Model information
-    st.sidebar.markdown("### 🤖 AI Models")
+    # Model information in sidebar
+    st.sidebar.title("🤖 AI Models")
     st.sidebar.info(f"**Search:** {SEARCH_MODEL}")
     st.sidebar.info(f"**Content:** {CONTENT_MODEL}")
     
-    # Route to appropriate page
-    if page == "📧 Generate Email":
-        email_generator_page(personalizer)
-    elif page == "📊 Club Status Dashboard":
-        club_status_page(personalizer)
-    elif page == "💰 Cost Analytics":
-        cost_analytics_page(personalizer)
-    elif page == "⚙️ Settings":
-        settings_page()
+    # Main email generator page
+    email_generator_page(personalizer)
 
 if __name__ == "__main__":
     main() 
