@@ -1,5 +1,5 @@
-club_name,email_sent_date,personalized_content,generated_email,search_cost,content_cost,web_search_cost,total_cost,created_at
-AUSTRALIAN PHOTOGRAPHIC SOCIETY,,I read about the Australian Photographic Society’s vibrant community and their innovative flagship events like APSCON 2024 and the Mullins Australian Conceptual Photography Prize. I believe DxO's advanced editing tools can help your members elevate their creative visions and showcase their work to even greater effect.,"#1 : Unlock Your Full Photo Potential with an Exclusive Offer!
+club_name,email_type,email_sent_date,personalized_content,generated_email,content_cost,total_cost,created_at
+AUSTRALIAN PHOTOGRAPHIC SOCIETY,introduction,,"I came across the Australian Photographic Society's recent success at APSCON 2023 and the Mullins Conceptual Photography Prize, showcasing your members’ diverse talents. I believe DxO’s advanced optical correction and creative tools could perfectly support your members’ nature, landscape, and experimental projects.","#1 : Unlock Your Full Photo Potential with an Exclusive Offer!
 
 Image
  
@@ -9,7 +9,7 @@ I hope the photographers at AUSTRALIAN PHOTOGRAPHIC SOCIETY are enjoying a creat
 
 I’m Killian, part of the Partnerships team at DxO Labs, the creators of award-winning photo editing software like DxO PhotoLab and Nik Collection. 
 
-I read about the Australian Photographic Society’s vibrant community and their innovative flagship events like APSCON 2024 and the Mullins Australian Conceptual Photography Prize. I believe DxO's advanced editing tools can help your members elevate their creative visions and showcase their work to even greater effect.
+I came across the Australian Photographic Society's recent success at APSCON 2023 and the Mullins Conceptual Photography Prize, showcasing your members’ diverse talents. I believe DxO’s advanced optical correction and creative tools could perfectly support your members’ nature, landscape, and experimental projects.
 
 We're offering an exclusive discount on all new DxO software for members of selected photography clubs, and I'd love to extend this offer to your group. 
 
@@ -20,4 +20,59 @@ Best regards,
 Killian Dare
 Photo Club Partnerships
 DxO Labs
-3, rue Nationale, 92100 Boulogne-Billancourt – France",0.021358000000000002,0.00018470000000000002,0.01,0.03154270000000001,2025-07-08T10:36:52.174514
+3, rue Nationale, 92100 Boulogne-Billancourt – France",0.0001022,0.0001022,2025-07-10T11:16:59.437993
+AUSTRALIAN PHOTOGRAPHIC SOCIETY,acceptance,,"With approximately 1,200 members spanning enthusiasts and award-winning professionals, your club’s diverse leadership and communication channels—such as the APS eNews, Facebook, and Instagram—offer excellent platforms to showcase the DxO discount. We’ll guide you through setting up a seamless process for distributing the discount code via your preferred channels, ensuring your members can easily access and benefit from it.","#3 DxO Partnership Proposal – 20% Off for Your Members
+
+Hello {{First name}} 
+
+I hope you're doing well, and thank you again for your previous reply.
+
+With approximately 1,200 members spanning enthusiasts and award-winning professionals, your club’s diverse leadership and communication channels—such as the APS eNews, Facebook, and Instagram—offer excellent platforms to showcase the DxO discount. We’ll guide you through setting up a seamless process for distributing the discount code via your preferred channels, ensuring your members can easily access and benefit from it.
+
+We'd love to offer your photography club AUSTRALIAN PHOTOGRAPHIC SOCIETY an exclusive 20% discount on all new DxO software licenses (excluding upgrades):
+
+• DxO PhotoLab – A professional-grade RAW photo editor featuring DeepPRIME noise reduction technologies, U Point™ local adjustments, and best-in-class optical corrections.
+
+• Nik Collection – 7 powerful creative plug-ins to stylize your images and enhance your workflow in Photoshop, Lightroom, Photolab, Affinity Photo more or as standalone tools.
+
+• DxO PureRAW – Advanced RAW pre-processing that dramatically improves image quality before editing, thanks to AI-driven denoising and unmatched lens corrections, which works seamlessly with Lightroom and other editors.
+
+• DxO FilmPack – Authentic analog film styles recreated with vintage effects, color rendering, and grain simulations.
+
+• DxO ViewPoint – Essential geometry correction tools to fix distortion, perspective issues, and volume deformation, especially in wide-angle shots.
+
+How it works:
+
+We've set up a simple online form that members can fill out with their name and email. Once submitted, they'll instantly receive their unique discount code — both on-screen and by email.
+
+We're also happy to provide your club with free licenses for up to two club computers, ideal for demos, workshops, or general club use.
+
+If it's helpful, I'd be glad to organize a short Zoom session to introduce the software to your team or members.
+
+Let me know if you'd like me to send you the custom link and flyer to share with your group. And out of curiosity — what kind of photography does your club focus on?
+
+Looking forward to hearing from you!
+
+Best regards,
+
+Killian Dare
+Photo Club Partnerships
+DxO Labs
+3, rue Nationale, 92100 Boulogne-Billancourt - France ",0.0001083,0.0001083,2025-07-10T11:54:46.510954
+AUSTRALIAN PHOTOGRAPHIC SOCIETY,checkup,,"With the Mullins Prize deadline approaching in mid-June, this is an ideal moment to showcase how DxO PhotoLab’s superior RAW processing can help your members produce the highest quality TIFFs. Additionally, with the upcoming low-key portrait competition closing at the end of June, Nik Collection’s Silver Efex could provide the perfect finishing touch to their entries.","#2 Any thoughts on the DxO offer for your members?
+
+Hello {{First name}} 
+
+With the Mullins Prize deadline approaching in mid-June, this is an ideal moment to showcase how DxO PhotoLab’s superior RAW processing can help your members produce the highest quality TIFFs. Additionally, with the upcoming low-key portrait competition closing at the end of June, Nik Collection’s Silver Efex could provide the perfect finishing touch to their entries.
+
+I just wanted to follow up on my previous message about offering your photography club, AUSTRALIAN PHOTOGRAPHIC SOCIETY, an exclusive discount on all new DxO software, including PhotoLab and Nik Collection.
+
+We'd still love to set this up for your members — it's an opportunity to give them access to powerful creative tools, and we make the process simple on your end.
+
+If you're interested or have any questions, I'm happy to help!
+
+Best regards,
+
+Killian Dare
+Photo Club Partnerships – DxO Labs
+3, rue Nationale 92100 Boulogne-Billancourt, France ",9.51e-05,9.51e-05,2025-07-10T11:55:07.527009

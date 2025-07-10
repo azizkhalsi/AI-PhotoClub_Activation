@@ -3,10 +3,11 @@ import pandas as pd
 import os
 from datetime import datetime
 import json
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config import *
+from src.club_research_manager import ClubResearchManager
 
 class CostTracker:
     """Track costs for different AI models and operations"""
@@ -50,22 +51,10 @@ class CostTracker:
         
         return total_cost
     
-    def add_search_cost(self, input_tokens: int, output_tokens: int, cached_tokens: int = 0):
-        """Add cost for O3 search operation"""
-        cost = self.calculate_token_cost(SEARCH_MODEL, input_tokens, output_tokens, cached_tokens)
-        self.costs['search_cost'] += cost
-        self.costs['total_cost'] += cost
-    
     def add_content_cost(self, input_tokens: int, output_tokens: int, cached_tokens: int = 0):
         """Add cost for GPT-4.1-nano content generation"""
         cost = self.calculate_token_cost(CONTENT_MODEL, input_tokens, output_tokens, cached_tokens)
         self.costs['content_cost'] += cost
-        self.costs['total_cost'] += cost
-    
-    def add_web_search_cost(self, num_queries: int = 1):
-        """Add cost for web search operations"""
-        cost = num_queries * WEB_SEARCH_COST_PER_QUERY
-        self.costs['web_search_cost'] += cost
         self.costs['total_cost'] += cost
     
     def get_costs(self) -> Dict[str, float]:
@@ -73,57 +62,55 @@ class CostTracker:
         return self.costs.copy()
 
 class EmailPersonalizer:
+    """
+    Handles email personalization using pre-researched club data.
+    Research is handled separately by ClubResearchManager.
+    """
+    
     def __init__(self):
         if not OPENAI_API_KEY:
             raise ValueError("OpenAI API key not found. Please set OPENAI_API_KEY in environment variables or .env file")
         
         try:
-            # Initialize OpenAI client with explicit parameters only
             self.openai_client = openai.OpenAI(
                 api_key=OPENAI_API_KEY,
                 timeout=60.0,
                 max_retries=3,
             )
-        except TypeError as e:
-            # If there's a parameter issue, try with minimal parameters
-            try:
-                self.openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
-            except Exception as e2:
-                raise ValueError(f"Failed to initialize OpenAI client: {e2}")
         except Exception as e:
             raise ValueError(f"Failed to initialize OpenAI client: {e}")
         
         self.tracking_csv_path = 'sent_emails_tracking.csv'
+        self.research_csv_path = CLUBS_RESEARCH_CSV_PATH
+        self.research_manager = ClubResearchManager()
         self._initialize_tracking_csv()
         
     def _initialize_tracking_csv(self):
         """Initialize CSV file to track sent emails and costs"""
-        import os
         if not os.path.exists(self.tracking_csv_path):
             tracking_df = pd.DataFrame(columns=[
-                'club_name', 'email_sent_date', 'personalized_content', 
-                'generated_email', 'search_cost', 'content_cost', 
-                'web_search_cost', 'total_cost', 'created_at'
+                'club_name', 'email_type', 'email_sent_date', 'personalized_content', 
+                'generated_email', 'content_cost', 'total_cost', 'created_at'
             ])
             tracking_df.to_csv(self.tracking_csv_path, index=False)
     
     def load_clubs_data(self) -> pd.DataFrame:
         """Load clubs data from CSV file"""
         try:
-            # Load CSV with more robust parsing
             df = pd.read_csv(
                 CLUBS_CSV_PATH,
                 encoding='utf-8',
                 quotechar='"',
                 escapechar='\\',
-                on_bad_lines='skip',  # Skip malformed lines
-                engine='python'  # Use Python engine for better error handling
+                on_bad_lines='skip',
+                engine='python',
+                skipinitialspace=True,
+                doublequote=True,
+                sep=','
             )
             
             print(f"✅ Loaded {len(df)} records from CSV")
-            print(f"📊 Columns: {list(df.columns)}")
             
-            # Get unique clubs (since CSV has multiple contacts per club)
             if 'Club' in df.columns:
                 unique_clubs = df.groupby('Club').first().reset_index()
                 print(f"✅ Found {len(unique_clubs)} unique clubs")
@@ -132,43 +119,111 @@ class EmailPersonalizer:
                 print(f"❌ 'Club' column not found in CSV. Available columns: {list(df.columns)}")
                 return pd.DataFrame()
                 
-        except FileNotFoundError:
-            print(f"❌ CSV file not found: {CLUBS_CSV_PATH}")
-            return pd.DataFrame()
         except Exception as e:
             print(f"❌ Error loading clubs data: {e}")
-            print(f"   Trying alternative parsing method...")
-            
-            # Fallback: try with different parameters
-            try:
-                df = pd.read_csv(
-                    CLUBS_CSV_PATH,
-                    encoding='utf-8',
-                    on_bad_lines='skip',
-                    engine='c',
-                    low_memory=False
-                )
-                print(f"✅ Fallback method loaded {len(df)} records")
-                unique_clubs = df.groupby('Club').first().reset_index()
-                return unique_clubs
-            except Exception as e2:
-                print(f"❌ Fallback method also failed: {e2}")
-                return pd.DataFrame()
+            return pd.DataFrame()
     
-    def load_email_template(self) -> str:
-        """Load the base email template"""
+    def load_email_template(self, email_type: str = 'introduction') -> str:
+        """Load the base email template for specific email type"""
+        # Get the project root directory (parent of src)
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        template_files = {
+            'introduction': 'introduction_email_template.txt',
+            'checkup': 'checkup_email_template.txt',
+            'acceptance': 'acceptance_email_template.txt'
+        }
+        
+        template_filename = template_files.get(email_type, 'introduction_email_template.txt')
+        
+        # Try multiple possible locations for templates
+        possible_paths = [
+            os.path.join(project_root, 'templates', template_filename),  # Project root/templates/
+            os.path.join('templates', template_filename),               # Current dir/templates/
+            os.path.join('..', 'templates', template_filename),        # Parent dir/templates/
+            os.path.join('..', '..', 'templates', template_filename),  # Two levels up/templates/
+            template_filename                                           # Current dir/
+        ]
+        
+        for template_path in possible_paths:
+            try:
+                if os.path.exists(template_path):
+                    with open(template_path, 'r', encoding='utf-8') as file:
+                        content = file.read()
+                        print(f"✅ Loaded {email_type} template from: {template_path}")
+                        return content
+            except Exception as e:
+                continue
+        
+        # Fallback to the old template path
         try:
             with open(EMAIL_TEMPLATE_PATH, 'r', encoding='utf-8') as file:
-                return file.read()
+                content = file.read()
+                print(f"✅ Loaded fallback template")
+                return content
         except Exception as e:
-            print(f"Error loading email template: {e}")
+            print(f"❌ Could not load email template for {email_type}")
             return ""
     
-    def check_email_sent(self, club_name: str) -> Tuple[bool, Optional[Dict]]:
-        """Check if email has already been sent to a club"""
+    def get_club_research(self, club_name: str, email_type: str = 'introduction') -> Optional[str]:
+        """Get research data for a club from CSV for specific email type"""
+        try:
+            research_df = pd.read_csv(self.research_csv_path)
+            club_research = research_df[research_df['club_name'] == club_name]
+            
+            if not club_research.empty:
+                research_entry = club_research.iloc[0]
+                
+                # Check if research is still valid
+                expires_at = pd.to_datetime(research_entry['expires_at'])
+                if datetime.now() > expires_at:
+                    print(f"⏰ Research expired for {club_name}")
+                    return None
+                
+                # Return research for specific email type
+                research_columns = {
+                    'introduction': 'introduction_research',
+                    'checkup': 'checkup_research',
+                    'acceptance': 'acceptance_research'
+                }
+                
+                research_column = research_columns.get(email_type, 'introduction_research')
+                research_data = research_entry.get(research_column, '')
+                
+                if research_data:
+                    print(f"📋 Found {email_type} research for {club_name}")
+                    return research_data
+                else:
+                    print(f"❌ No {email_type} research found for {club_name}")
+                    return None
+            
+            print(f"❌ No research found for {club_name}")
+            return None
+            
+        except FileNotFoundError:
+            print(f"📁 Research file not found: {self.research_csv_path}")
+            return None
+        except Exception as e:
+            print(f"⚠️ Error loading research for {club_name}: {e}")
+            return None
+    
+    def is_club_research_available(self, club_name: str) -> bool:
+        """Check if research is available for a club"""
+        research = self.get_club_research(club_name)
+        return research is not None
+    
+    def preview_club_research(self, club_name: str, email_type: str = 'introduction') -> Optional[str]:
+        """Get research preview for a club"""
+        return self.get_club_research(club_name, email_type)
+    
+    def check_email_sent(self, club_name: str, email_type: str = 'introduction') -> Tuple[bool, Optional[Dict]]:
+        """Check if email has already been sent to a club for specific email type"""
         try:
             tracking_df = pd.read_csv(self.tracking_csv_path)
-            club_record = tracking_df[tracking_df['club_name'] == club_name]
+            club_record = tracking_df[
+                (tracking_df['club_name'] == club_name) & 
+                (tracking_df['email_type'] == email_type)
+            ]
             
             if not club_record.empty:
                 record = club_record.iloc[0]
@@ -176,7 +231,8 @@ class EmailPersonalizer:
                     'email_sent_date': record.get('email_sent_date', None),
                     'personalized_content': record.get('personalized_content', ''),
                     'generated_email': record.get('generated_email', ''),
-                    'total_cost': record.get('total_cost', 0.0)
+                    'total_cost': record.get('total_cost', 0.0),
+                    'created_at': record.get('created_at', None)
                 }
             return False, None
         except FileNotFoundError:
@@ -185,139 +241,142 @@ class EmailPersonalizer:
             print(f"Error checking email status for {club_name}: {e}")
             return False, None
     
-    def research_club_with_o3(self, club_name: str, website: str = None, country: str = None) -> Tuple[str, Dict]:
-        """Use O3 with web search to research club information"""
+    def generate_personalized_content(self, club_name: str, club_research: str, email_type: str = 'introduction') -> Tuple[str, Dict]:
+        """Generate personalized content using research data for specific email type"""
         
         cost_tracker = CostTracker()
         
-        # Add web search cost (estimated)
-        cost_tracker.add_web_search_cost(1)
+        # Email type specific prompts
+        email_contexts = {
+            'introduction': {
+                'context': 'This is the FIRST email we\'re sending to this club. We are introducing ourselves and offering a discount for DxO products to their members.',
+                'focus': 'catching their attention with recent achievements and specialties',
+                'tone': 'professional and confident - this is our first impression'
+            },
+            'checkup': {
+                'context': 'This is a FOLLOW-UP email because they didn\'t respond to our introduction. We need to create urgency and show value.',
+                'focus': 'upcoming events, deadlines, and time-sensitive opportunities',
+                'tone': 'friendly but urgent - showing we understand their needs'
+            },
+            'acceptance': {
+                'context': 'This email is sent when they ACCEPT our offer. We need to explain how the discount process works.',
+                'focus': 'club structure, member communication, and discount implementation',
+                'tone': 'helpful and instructional - guiding them through the process'
+            }
+        }
         
-        search_query = f"photography club '{club_name}'"
-        if country:
-            search_query += f" {country}"
-        if website:
-            search_query += f" site:{website}"
-            
-        # Create a detailed search prompt for O3 with web search capabilities
-        search_prompt = f"""
-        You are a research assistant with web search capabilities. I need you to search the web and find specific, current information about the photography club "{club_name}".
+        email_context = email_contexts.get(email_type, email_contexts['introduction'])
+        
+        # Different prompts for different email types
+        if email_type == 'introduction':
+            content_prompt = f"""
+            You are writing a personalized addition for a professional marketing email from DxO Labs to a photography club.
 
-        **IMPORTANT: Use web search to find real, current information about this specific club.**
+            **EMAIL TYPE: INTRODUCTION EMAIL**
+            **CONTEXT:** {email_context['context']}
 
-        Search for and provide specific details about:
-        1. **Recent Activities:** Latest exhibitions, photo walks, workshops, or competitions they've organized (with dates if possible)
-        2. **Upcoming Events:** Any announced future events, meetings, or special projects
-        3. **Photography Specialties:** What types of photography they focus on (landscape, portrait, street, wildlife, macro, etc.)
-        4. **Notable Achievements:** Recent awards, recognition, or member accomplishments
-        5. **Unique Characteristics:** What makes this club special or different from others
-        6. **Community Projects:** Any community involvement, charity work, or local partnerships
-        7. **Member Highlights:** Featured photographers or notable member work
-        8. **Club History:** Founding date, milestones, or significant moments
-        
-        Club details to help your search:
-        - Name: {club_name}
-        - Country: {country if country else 'Unknown'}
-        - Website: {website if website else 'Not provided'}
-        
-        **CRITICAL:** Please search the web for this specific club and provide concrete findings. Don't provide generic information - I need specific details that prove genuine knowledge of this particular club.
-        
-        Format your response as:
-        **SPECIFIC FINDINGS:**
-        [List concrete facts you found about this club]
-        
-        **RECENT ACTIVITIES:**
-        [Recent events, exhibitions, or activities with dates]
-        
-        **CLUB SPECIALTIES:**
-        [Their photography focus areas and unique characteristics]
-        
-        **PERSONALIZATION ANGLE:**
-        [Specific aspect that would make a good personalization hook for an email]
-        
-        If you cannot find specific information about this exact club, clearly state that and provide what general information you can find about photography clubs in their region, but be honest about the limitations.
-        """
-        
-        try:
-            response = self.openai_client.chat.completions.create(
-                model=SEARCH_MODEL,
-                messages=[
-                    {"role": "system", "content": "You are a research assistant with web search capabilities. You must search the internet to find specific, current information about photography clubs and communities. Always use web search to find real, up-to-date information rather than relying on training data. Focus on finding concrete details like recent events, specific activities, and unique characteristics of each club."},
-                    {"role": "user", "content": search_prompt}
-                ]
-            )
-            
-            # Extract and track costs from API response
-            if hasattr(response, 'usage') and response.usage:
-                usage = response.usage
-                input_tokens = getattr(usage, 'prompt_tokens', 0)
-                output_tokens = getattr(usage, 'completion_tokens', 0)
-                cached_tokens = getattr(usage, 'prompt_tokens_cached', 0)
-                
-                print(f"🔍 {SEARCH_MODEL} API Response Usage:")
-                print(f"   Input tokens: {input_tokens}")
-                print(f"   Output tokens: {output_tokens}")
-                print(f"   Cached tokens: {cached_tokens}")
-                
-                cost_tracker.add_search_cost(input_tokens, output_tokens, cached_tokens)
-            else:
-                print(f"⚠️ Warning: No usage information available from {SEARCH_MODEL} API response")
-            
-            research_result = response.choices[0].message.content.strip()
-            
-            return research_result, cost_tracker.get_costs()
-            
-        except Exception as e:
-            print(f"Error researching club {club_name} with O3: {e}")
-            fallback_result = f"""
-            **SPECIFIC FINDINGS:**
-            Unable to find specific current information about {club_name} due to research limitations.
-            
-            **RECENT ACTIVITIES:**
-            No specific recent activities found.
-            
-            **CLUB SPECIALTIES:**
-            General photography club activities assumed based on location: {country if country else 'Unknown region'}
-            
-            **PERSONALIZATION ANGLE:**
-            Focus on general photography community support and learning more about their specific activities.
+            **CLUB RESEARCH FOR INTRODUCTION EMAIL:**
+            {club_research}
+
+            **YOUR TASK:**
+            Generate ONLY 1-2 personalized sentences that will be inserted after this line in the email:
+            "I'm Killian, part of the Partnerships team at DxO Labs, the creators of award-winning photo editing software like DxO PhotoLab and Nik Collection."
+
+            **REQUIREMENTS:**
+            - Start with "I read about..." or "I came across..." or "I noticed..." or "I was impressed by..."
+            - Reference specific research findings about {club_name}
+            - Focus on {email_context['focus']}
+            - Connect to DxO's software benefits naturally for their specific photography focus
+            - Be {email_context['tone']}
+            - Maximum 2 sentences
+            - Return ONLY the personalized sentences, nothing else
+
+            **EXAMPLE OUTPUT:**
+            "I read about your recent 'Urban Nights' exhibition and was impressed by the technical challenges your members tackled with low-light street photography. I believe DxO PhotoLab's industry-leading noise reduction could help your photographers push those ISO limits even further."
+
+            **GENERATE ONLY THE PERSONALIZED SENTENCES FOR INTRODUCTION EMAIL:**
             """
-            return fallback_result, cost_tracker.get_costs()
-    
-    def generate_personalized_content(self, club_name: str, club_research: str) -> Tuple[str, Dict]:
-        """Generate ONLY the personalized addition (1-2 sentences) using GPT-4.1-nano"""
         
-        cost_tracker = CostTracker()
+        elif email_type == 'checkup':
+            content_prompt = f"""
+            You are writing a personalized addition for a follow-up email from DxO Labs to a photography club that didn't respond to the initial offer.
+
+            **EMAIL TYPE: CHECKUP/FOLLOW-UP EMAIL**
+            **CONTEXT:** {email_context['context']}
+
+            **CLUB RESEARCH FOR CHECKUP EMAIL:**
+            {club_research}
+
+            **YOUR TASK:**
+            Generate ONLY 1-2 personalized sentences that will be inserted after the greeting in a follow-up email.
+
+            **REQUIREMENTS:**
+            - Reference upcoming events, deadlines, or time-sensitive opportunities from research
+            - Create urgency but remain friendly
+            - Show you understand their current activities and needs
+            - Connect timing to when DxO tools would be most valuable
+            - Be {email_context['tone']}
+            - Maximum 2 sentences
+            - Return ONLY the personalized sentences, nothing else
+
+            **EXAMPLE OUTPUT:**
+            "I noticed you have your annual photography competition coming up in March and thought this might be perfect timing. Many clubs find DxO tools especially valuable when members are preparing their best work for competitions."
+
+            **GENERATE ONLY THE PERSONALIZED SENTENCES FOR CHECKUP EMAIL:**
+            """
         
-        content_prompt = f"""
-        You are writing a personalized addition for a professional marketing email from DxO Labs to a photography club.
+        elif email_type == 'acceptance':
+            content_prompt = f"""
+            You are writing a personalized addition for an acceptance email from DxO Labs to a photography club that has shown interest in the partnership.
 
-        **CLUB RESEARCH:**
-        {club_research}
+            **EMAIL TYPE: ACCEPTANCE/PARTNERSHIP EMAIL**
+            **CONTEXT:** {email_context['context']}
 
-        **YOUR TASK:**
-        Generate ONLY 1-2 personalized sentences that will be inserted after this line in the email:
-        "I'm Killian, part of the Partnerships team at DxO Labs, the creators of award-winning photo editing software like DxO PhotoLab and Nik Collection."
+            **CLUB RESEARCH FOR ACCEPTANCE EMAIL:**
+            {club_research}
 
-        **REQUIREMENTS:**
-        - Start with "I read about..." or "I came across..." or "I noticed..." or "I was impressed by..."
-        - Reference specific research findings about {club_name}
-        - Connect to DxO's software benefits naturally
-        - Be professional and confident
-        - Maximum 2 sentences
-        - Return ONLY the personalized sentences, nothing else
+            **YOUR TASK:**
+            Generate ONLY 1-2 personalized sentences that acknowledge their club structure and show understanding of how they communicate with members.
 
-        **EXAMPLE OUTPUT:**
-        "I read about your recent 'Urban Nights' exhibition and was impressed by the technical challenges your members tackled with low-light street photography. I believe DxO PhotoLab's industry-leading noise reduction could help your photographers push those ISO limits even further."
+            **REQUIREMENTS:**
+            - Reference their club size, organization, or communication methods from research
+            - Show understanding of how they handle member benefits
+            - Acknowledge their community or leadership structure
+            - Be {email_context['tone']}
+            - Maximum 2 sentences
+            - Return ONLY the personalized sentences, nothing else
 
-        **GENERATE ONLY THE PERSONALIZED SENTENCES:**
-        """
+            **EXAMPLE OUTPUT:**
+            "I understand you have about 50 active members and typically share benefits through your monthly newsletter. This partnership structure should work perfectly with your existing member communication process."
+
+            **GENERATE ONLY THE PERSONALIZED SENTENCES FOR ACCEPTANCE EMAIL:**
+            """
+        
+        else:
+            # Default to introduction
+            content_prompt = f"""
+            You are writing a personalized addition for a professional marketing email from DxO Labs to a photography club.
+
+            **CLUB RESEARCH:**
+            {club_research}
+
+            **YOUR TASK:**
+            Generate ONLY 1-2 personalized sentences referencing specific research findings about {club_name}.
+
+            **REQUIREMENTS:**
+            - Reference specific research findings
+            - Connect to DxO's software benefits
+            - Maximum 2 sentences
+            - Return ONLY the personalized sentences, nothing else
+
+            **GENERATE PERSONALIZED CONTENT:**
+            """
         
         try:
             response = self.openai_client.chat.completions.create(
                 model=CONTENT_MODEL,
                 messages=[
-                    {"role": "system", "content": "You are a professional marketing specialist for DxO Labs creating personalized content for photography club outreach. Generate ONLY the requested personalized sentences, nothing else. Do not include any email template or other content."},
+                    {"role": "system", "content": f"You are a professional marketing specialist for DxO Labs creating personalized content for photography club {email_type} emails. Generate ONLY the requested personalized sentences that show genuine knowledge of the club and connect to DxO software benefits. Do not include any email template or other content."},
                     {"role": "user", "content": content_prompt}
                 ],
                 temperature=0.8,
@@ -334,7 +393,7 @@ class EmailPersonalizer:
                 cost_tracker.add_content_cost(input_tokens, output_tokens, cached_tokens)
             
             personalized_content = response.choices[0].message.content.strip()
-            print(f"✨ Generated personalized content for {club_name}: {len(personalized_content)} characters")
+            print(f"✨ Generated {email_type} personalized content for {club_name}: {len(personalized_content)} characters")
             
             return personalized_content, cost_tracker.get_costs()
             
@@ -343,65 +402,90 @@ class EmailPersonalizer:
             fallback_content = f"I came across {club_name} and was impressed by your photography community's dedication to advancing the art of photography. I'd love to explore how DxO's professional editing tools could support your members' creative work."
             return fallback_content, cost_tracker.get_costs()
     
-    def generate_personalized_email(self, club_name: str) -> Tuple[str, str, str, Dict]:
-        """Generate complete personalized email for a club with cost tracking"""
+    def generate_personalized_email(self, club_name: str, email_type: str = 'introduction', auto_research: bool = True) -> Tuple[str, str, str, Dict]:
+        """Generate complete personalized email for a club with automatic research if needed"""
         
-        total_costs = {
-            'search_cost': 0.0,
-            'content_cost': 0.0,
-            'web_search_cost': 0.0,
-            'total_cost': 0.0
-        }
+        # Check if research is available
+        club_research = self.get_club_research(club_name, email_type)
+        total_costs = {'total_cost': 0.0, 'content_cost': 0.0, 'search_cost': 0.0}
         
-        # Load clubs data to get club details
-        clubs_df = self.load_clubs_data()
-        club_data = clubs_df[clubs_df['Club'] == club_name]
+        if not club_research and auto_research:
+            print(f"🔍 No {email_type} research found for '{club_name}'. Auto-researching...")
+            
+            # Get club data for research
+            clubs_df = self.load_clubs_data()
+            club_data = clubs_df[clubs_df['Club'] == club_name]
+            
+            if club_data.empty:
+                raise ValueError(f"Club '{club_name}' not found in clubs database")
+            
+            club_row = club_data.iloc[0]
+            website = club_row.get('Website', '')
+            country = club_row.get('Country', '')
+            
+            # Perform automatic research
+            print(f"🔍 Researching {club_name} automatically...")
+            research_results, research_costs = self.research_manager.research_club_with_o3(
+                club_name, website, country
+            )
+            
+            # Add research costs to total
+            total_costs['search_cost'] += research_costs.get('total_cost', 0.0)
+            total_costs['total_cost'] += research_costs.get('total_cost', 0.0)
+            
+            print(f"✅ Auto-research completed for {club_name}. Cost: ${research_costs.get('total_cost', 0.0):.4f}")
+            
+            # Now get the research we just generated
+            club_research = self.get_club_research(club_name, email_type)
+            
+            if not club_research:
+                raise ValueError(f"Auto-research failed to generate {email_type} research for '{club_name}'")
         
-        if club_data.empty:
-            raise ValueError(f"Club '{club_name}' not found in database")
+        elif not club_research:
+            raise ValueError(f"No {email_type} research available for '{club_name}' and auto-research is disabled.")
         
-        club_info = club_data.iloc[0]
-        website = club_info.get('Website', '')
-        country = club_info.get('Country', '')
+        print(f"✨ Generating {email_type} email for {club_name} using available research...")
         
-        # Step 1: Research the club with O3
-        print(f"🔍 Researching {club_name} with O3...")
-        club_research, search_costs = self.research_club_with_o3(club_name, website, country)
-        
-        # Add search costs to total
-        for cost_type, cost_value in search_costs.items():
-            total_costs[cost_type] += cost_value
-        
-        # Step 2: Generate personalized content with GPT-4.1-nano
-        print(f"✨ Generating personalized content with GPT-4.1-nano...")
-        personalized_content, content_costs = self.generate_personalized_content(club_name, club_research)
+        # Generate personalized content
+        personalized_content, content_costs = self.generate_personalized_content(club_name, club_research, email_type)
         
         # Add content costs to total
-        for cost_type, cost_value in content_costs.items():
-            total_costs[cost_type] += cost_value
+        total_costs['content_cost'] += content_costs.get('total_cost', 0.0)
+        total_costs['total_cost'] += content_costs.get('total_cost', 0.0)
         
-        # Step 3: Load email template and combine
-        print(f"📧 Combining template with personalized content...")
-        template = self.load_email_template()
+        # Load email template
+        template = self.load_email_template(email_type)
         if not template:
-            raise ValueError("Could not load email template")
+            raise ValueError(f"Could not load email template for {email_type}")
         
         # Combine template with personalized content
-        complete_email = self.combine_email_with_personalization(template, personalized_content, club_name)
+        complete_email = self.combine_email_with_personalization(template, personalized_content, club_name, email_type)
         
-        print(f"✅ Email generation completed for {club_name}")
+        print(f"✅ {email_type.capitalize()} email generation completed for {club_name}")
         print(f"📝 Personalized content: {personalized_content[:100]}...")
         print(f"📧 Complete email length: {len(complete_email)} characters")
-        print(f"💰 Total cost: ${total_costs['total_cost']:.4f}")
+        print(f"💰 Total cost: ${total_costs['total_cost']:.4f} (Research: ${total_costs['search_cost']:.4f}, Content: ${total_costs['content_cost']:.4f})")
         
         return complete_email, personalized_content, club_research, total_costs
     
-    def combine_email_with_personalization(self, template: str, personalized_content: str, club_name: str) -> str:
-        """Combine the email template with personalized content"""
+    def combine_email_with_personalization(self, template: str, personalized_content: str, club_name: str, email_type: str = 'introduction') -> str:
+        """Combine the email template with personalized content based on email type"""
         
         # Replace club name placeholder
         email = template.replace("{{Company name}}", club_name)
         
+        if email_type == 'introduction':
+            return self._insert_introduction_personalization(email, personalized_content)
+        elif email_type == 'checkup':
+            return self._insert_checkup_personalization(email, personalized_content, club_name)
+        elif email_type == 'acceptance':
+            return self._insert_acceptance_personalization(email, personalized_content, club_name)
+        else:
+            # Fallback to introduction logic
+            return self._insert_introduction_personalization(email, personalized_content)
+    
+    def _insert_introduction_personalization(self, email: str, personalized_content: str) -> str:
+        """Insert personalization for introduction emails"""
         # Look for the exact pattern from the template
         killian_line = "I'm Killian, part of the Partnerships team at DxO Labs, the creators of award-winning photo editing software like DxO PhotoLab and Nik Collection."
         
@@ -421,7 +505,7 @@ class EmailPersonalizer:
                     f"\n\n{personalized_content}" + 
                     email[next_section_start:]
                 )
-                print(f"✅ Successfully inserted personalized content after Killian's introduction")
+                print(f"✅ Successfully inserted introduction personalization after Killian's introduction")
                 return combined_email
             else:
                 # Fallback: look for any double newline after Killian's line
@@ -432,180 +516,212 @@ class EmailPersonalizer:
                         f"\n\n{personalized_content}" + 
                         email[next_paragraph:]
                     )
-                    print(f"✅ Inserted personalized content at next paragraph break")
+                    print(f"✅ Inserted introduction personalization at next paragraph break")
                     return combined_email
         
-        # Enhanced fallback with more precise insertion
-        print(f"⚠️ Could not find exact Killian line, trying partial match...")
+        # Fallback: append at the end before signature
+        signature_start = email.find("Best regards,")
+        if signature_start != -1:
+            combined_email = (
+                email[:signature_start] + 
+                f"{personalized_content}\n\n" + 
+                email[signature_start:]
+            )
+            print(f"✅ Inserted introduction personalization before signature")
+            return combined_email
         
-        # Try to find just the start of Killian's introduction
-        killian_start = email.find("I'm Killian, part of the Partnerships team")
-        if killian_start != -1:
-            # Find the end of the sentence (look for period followed by space or newline)
-            sentence_end = email.find(".", killian_start)
-            while sentence_end != -1 and sentence_end < len(email) - 1:
-                if email[sentence_end + 1] in [' ', '\n']:
-                    break
-                sentence_end = email.find(".", sentence_end + 1)
-            
-            if sentence_end != -1:
-                # Look for next paragraph after this sentence
-                next_paragraph = email.find("\n\n", sentence_end)
+        return email + f"\n\n{personalized_content}"
+    
+    def _insert_checkup_personalization(self, email: str, personalized_content: str, club_name: str) -> str:
+        """Insert personalization for checkup emails"""
+        # For checkup emails, insert personalized content after the greeting
+        greeting_end = email.find(f"Hello {{{{First name}}}}")
+        if greeting_end == -1:
+            greeting_end = email.find("Hello")
+        
+        if greeting_end != -1:
+            # Find the end of the greeting line and next paragraph
+            line_end = email.find("\n", greeting_end)
+            if line_end != -1:
+                next_paragraph = email.find("\n\n", line_end)
                 if next_paragraph != -1:
+                    # Insert personalized content after greeting
                     combined_email = (
-                        email[:sentence_end + 1] + 
+                        email[:next_paragraph] + 
                         f"\n\n{personalized_content}" + 
                         email[next_paragraph:]
                     )
-                    print(f"✅ Inserted personalized content after partial Killian match")
+                    print(f"✅ Successfully inserted checkup personalization after greeting")
                     return combined_email
         
-        # Final fallback: Insert after the first paragraph that contains "DxO Labs"
-        dxo_mention = email.find("DxO Labs")
-        if dxo_mention != -1:
-            next_paragraph = email.find("\n\n", dxo_mention)
-            if next_paragraph != -1:
-                combined_email = (
-                    email[:next_paragraph] + 
-                    f"\n\n{personalized_content}" + 
-                    email[next_paragraph:]
-                )
-                print(f"✅ Inserted personalized content after DxO Labs mention")
-                return combined_email
+        # Fallback: insert before "I just wanted to follow up"
+        followup_start = email.find("I just wanted to follow up")
+        if followup_start != -1:
+            combined_email = (
+                email[:followup_start] + 
+                f"{personalized_content}\n\n" + 
+                email[followup_start:]
+            )
+            print(f"✅ Inserted checkup personalization before follow-up message")
+            return combined_email
         
-        # Last resort: append at the end
-        print(f"❌ All insertion attempts failed, appending at end")
+        # Last resort: after first paragraph
+        first_paragraph_end = email.find("\n\n")
+        if first_paragraph_end != -1:
+            combined_email = (
+                email[:first_paragraph_end] + 
+                f"\n\n{personalized_content}" + 
+                email[first_paragraph_end:]
+            )
+            print(f"✅ Inserted checkup personalization after first paragraph")
+            return combined_email
+        
         return email + f"\n\n{personalized_content}"
     
-    def save_generated_email(self, club_name: str, personalized_content: str, generated_email: str, costs: Dict, mark_as_sent: bool = False):
+    def _insert_acceptance_personalization(self, email: str, personalized_content: str, club_name: str) -> str:
+        """Insert personalization for acceptance emails"""
+        # For acceptance emails, insert after the greeting and thank you line
+        greeting_section = email.find("I hope you're doing well, and thank you again for your previous reply.")
+        
+        if greeting_section != -1:
+            # Find the end of this sentence and insert after it
+            sentence_end = email.find(".", greeting_section) + 1
+            # Insert personalized content right after the greeting sentence
+            combined_email = (
+                email[:sentence_end] + 
+                f"\n\n{personalized_content}\n\n" + 
+                email[sentence_end:].lstrip()
+            )
+            print(f"✅ Successfully inserted acceptance personalization after greeting")
+            return combined_email
+        
+        # Fallback: insert before the discount details
+        discount_start = email.find("We'd love to offer your photography club")
+        if discount_start != -1:
+            combined_email = (
+                email[:discount_start] + 
+                f"{personalized_content}\n\n" + 
+                email[discount_start:]
+            )
+            print(f"✅ Inserted acceptance personalization before discount details")
+            return combined_email
+        
+        # Another fallback: after the greeting line
+        greeting_line = email.find("Hello {{First name}}")
+        if greeting_line == -1:
+            greeting_line = email.find(f"Hello {club_name}")
+        if greeting_line == -1:
+            greeting_line = email.find("Hello")
+        
+        if greeting_line != -1:
+            # Find the end of the greeting line
+            line_end = email.find("\n", greeting_line)
+            if line_end != -1:
+                # Find the next paragraph break
+                next_paragraph = email.find("\n\n", line_end)
+                if next_paragraph != -1:
+                    combined_email = (
+                        email[:next_paragraph] + 
+                        f"\n\n{personalized_content}" + 
+                        email[next_paragraph:]
+                    )
+                    print(f"✅ Inserted acceptance personalization after greeting line")
+                    return combined_email
+        
+        # Absolute last resort: append at the end before signature
+        signature_start = email.find("Best regards,")
+        if signature_start != -1:
+            combined_email = (
+                email[:signature_start] + 
+                f"{personalized_content}\n\n" + 
+                email[signature_start:]
+            )
+            print(f"✅ Inserted acceptance personalization before signature")
+            return combined_email
+        
+        return email + f"\n\n{personalized_content}"
+    
+    def save_generated_email(self, club_name: str, personalized_content: str, generated_email: str, costs: Dict, email_type: str = 'introduction', mark_as_sent: bool = False):
         """Save generated email to CSV with cost tracking"""
         
-        print(f"💾 Saving email for {club_name}...")
+        print(f"💾 Saving {email_type} email for {club_name}...")
         
         try:
             tracking_df = pd.read_csv(self.tracking_csv_path)
         except FileNotFoundError:
             tracking_df = pd.DataFrame(columns=[
-                'club_name', 'email_sent_date', 'personalized_content', 
-                'generated_email', 'search_cost', 'content_cost', 
-                'web_search_cost', 'total_cost', 'created_at'
+                'club_name', 'email_type', 'email_sent_date', 'personalized_content', 
+                'generated_email', 'content_cost', 'total_cost', 'created_at'
             ])
         
         email_sent_date = datetime.now().isoformat() if mark_as_sent else None
         created_at = datetime.now().isoformat()
         
         # Remove existing record if it exists
-        tracking_df = tracking_df[tracking_df['club_name'] != club_name]
+        tracking_df = tracking_df[
+            ~((tracking_df['club_name'] == club_name) & (tracking_df['email_type'] == email_type))
+        ]
         
         # Add new record
         new_record = pd.DataFrame([{
             'club_name': club_name,
+            'email_type': email_type,
             'email_sent_date': email_sent_date,
-            'personalized_content': personalized_content,  # Only the personalized addition
-            'generated_email': generated_email,  # Complete email with personalization
-            'search_cost': costs['search_cost'],
-            'content_cost': costs['content_cost'],
-            'web_search_cost': costs['web_search_cost'],
-            'total_cost': costs['total_cost'],
+            'personalized_content': personalized_content,
+            'generated_email': generated_email,
+            'content_cost': costs.get('content_cost', 0.0),
+            'total_cost': costs.get('total_cost', 0.0),
             'created_at': created_at
         }])
         
         tracking_df = pd.concat([tracking_df, new_record], ignore_index=True)
         tracking_df.to_csv(self.tracking_csv_path, index=False)
         
-        print(f"✅ Email saved for {club_name} (Cost: ${costs['total_cost']:.4f})" + (" and marked as sent" if mark_as_sent else ""))
-        print(f"📝 Personalized content saved: {len(personalized_content)} characters")
-        print(f"📧 Complete email saved: {len(generated_email)} characters")
+        print(f"✅ {email_type.capitalize()} email saved for {club_name} (Cost: ${costs.get('total_cost', 0):.4f})" + (" and marked as sent" if mark_as_sent else ""))
     
-
-    def mark_email_as_sent(self, club_name: str):
+    def mark_email_as_sent(self, club_name: str, email_type: str = 'introduction'):
         """Mark an email as sent"""
         try:
             tracking_df = pd.read_csv(self.tracking_csv_path)
-            tracking_df.loc[tracking_df['club_name'] == club_name, 'email_sent_date'] = datetime.now().isoformat()
+            mask = (tracking_df['club_name'] == club_name) & (tracking_df['email_type'] == email_type)
+            tracking_df.loc[mask, 'email_sent_date'] = datetime.now().isoformat()
             tracking_df.to_csv(self.tracking_csv_path, index=False)
-            print(f"📤 Email marked as sent for {club_name}")
+            print(f"📤 {email_type.capitalize()} email marked as sent for {club_name}")
         except Exception as e:
             print(f"Error marking email as sent for {club_name}: {e}")
     
-    def get_all_clubs_status(self) -> pd.DataFrame:
-        """Get status of all clubs with cost information"""
-        clubs_df = self.load_clubs_data()
-        
+    def get_emails_by_type(self, email_type: str) -> List[Dict]:
+        """Get all emails of specific type"""
         try:
             tracking_df = pd.read_csv(self.tracking_csv_path)
-            tracking_df['status'] = tracking_df['email_sent_date'].apply(
-                lambda x: 'Sent' if pd.notna(x) else 'Generated'
-            )
+            type_emails = tracking_df[tracking_df['email_type'] == email_type]
+            return type_emails.to_dict('records')
         except FileNotFoundError:
-            tracking_df = pd.DataFrame(columns=['club_name', 'email_sent_date', 'total_cost', 'status'])
-        
-        # Merge with clubs data
-        status_df = clubs_df.merge(
-            tracking_df[['club_name', 'email_sent_date', 'total_cost', 'status']], 
-            left_on='Club', 
-            right_on='club_name', 
-            how='left'
-        )
-        
-        status_df['status'] = status_df['status'].fillna('Not Generated')
-        status_df['total_cost'] = status_df['total_cost'].fillna(0.0)
-        status_df = status_df.drop('club_name', axis=1, errors='ignore')
-        
-        return status_df[['Club', 'Country', 'Website', 'status', 'total_cost']]
+            return []
     
-    def get_total_costs(self) -> Dict[str, float]:
-        """Get total costs across all generated emails"""
+    def save_email_modification(self, club_name: str, modified_email: str, email_type: str = 'introduction') -> bool:
+        """Save modified email content"""
         try:
             tracking_df = pd.read_csv(self.tracking_csv_path)
-            
-            return {
-                'search_cost': tracking_df['search_cost'].sum(),
-                'content_cost': tracking_df['content_cost'].sum(),
-                'web_search_cost': tracking_df['web_search_cost'].sum(),
-                'total_cost': tracking_df['total_cost'].sum(),
-                'total_emails': len(tracking_df)
-            }
-        except FileNotFoundError:
-            return {
-                'search_cost': 0.0,
-                'content_cost': 0.0,
-                'web_search_cost': 0.0,
-                'total_cost': 0.0,
-                'total_emails': 0
-            }
-
-
-if __name__ == "__main__":
-    # Example usage
-    personalizer = EmailPersonalizer()
+            mask = (tracking_df['club_name'] == club_name) & (tracking_df['email_type'] == email_type)
+            tracking_df.loc[mask, 'generated_email'] = modified_email
+            tracking_df.loc[mask, 'created_at'] = datetime.now().isoformat()
+            tracking_df.to_csv(self.tracking_csv_path, index=False)
+            return True
+        except Exception as e:
+            print(f"Error saving email modification: {e}")
+            return False
     
-    # Test with AUSTRALIAN PHOTOGRAPHIC SOCIETY
-    test_club = "AUSTRALIAN PHOTOGRAPHIC SOCIETY"
-    
-    print(f"🚀 Running email generation for: {test_club}")
-    print("=" * 60)
-    
-    try:
-        email, content, research, costs = personalizer.generate_personalized_email(test_club)
-        
-        print(f"\n=== RESULTS FOR {test_club} ===")
-        print(f"\n📝 Personalized Content Generated:")
-        print(f"'{content}'")
-        print(f"\n📧 Complete Email (first 500 chars):")
-        print(email[:500] + "..." if len(email) > 500 else email)
-        print(f"\n🔍 Research Summary:")
-        print(research[:300] + "..." if len(research) > 300 else research)
-        print(f"\n💰 Costs Breakdown:")
-        for cost_type, cost_value in costs.items():
-            print(f"  {cost_type}: ${cost_value:.4f}")
-        
-        # Save the generated email
-        personalizer.save_generated_email(test_club, content, email, costs)
-        
-        print(f"\n✅ Email generation and saving completed for {test_club}")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc() 
+    def delete_email_record(self, club_name: str, email_type: str = 'introduction') -> bool:
+        """Delete email record"""
+        try:
+            tracking_df = pd.read_csv(self.tracking_csv_path)
+            original_len = len(tracking_df)
+            tracking_df = tracking_df[
+                ~((tracking_df['club_name'] == club_name) & (tracking_df['email_type'] == email_type))
+            ]
+            tracking_df.to_csv(self.tracking_csv_path, index=False)
+            return len(tracking_df) < original_len
+        except Exception as e:
+            print(f"Error deleting email record: {e}")
+            return False 
