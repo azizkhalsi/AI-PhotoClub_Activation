@@ -1,9 +1,5 @@
 # Brevo API Key Troubleshooting
 
-## Current Issue: "Key not found" Error (401)
-
-Your Brevo API key `xsmtpsib-76da3e22a32e85bc3a872319330c7992c6d411c706817f063eeab2aa3fb2cac8-MhjPBIwtsdanF32z` is being rejected by the Brevo API.
-
 ## Solutions to Try:
 
 ### 1. Verify API Key in Brevo Dashboard
