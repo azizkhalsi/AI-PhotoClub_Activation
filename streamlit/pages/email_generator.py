@@ -214,7 +214,25 @@ def email_generator_page():
                         
                         # Load contacts data for club
                         try:
-                            contacts_df = pd.read_csv('test_results_20250701_092437.csv', quotechar='"', escapechar='\\', on_bad_lines='skip')
+                            # Custom CSV parsing to handle field count mismatches
+                            import csv
+                            contacts_data = []
+                            
+                            with open('test_results_20250701_092437.csv', 'r', encoding='utf-8') as f:
+                                # Read header properly
+                                header_line = f.readline().strip()
+                                header = header_line.split(',')
+                                expected_fields = len(header)
+                                
+                                # Read data rows
+                                reader = csv.reader(f, quotechar='"')
+                                for row_num, row in enumerate(reader, start=2):
+                                    if len(row) >= expected_fields:
+                                        # Truncate to expected number of fields if there are extras
+                                        row_data = dict(zip(header, row[:expected_fields]))
+                                        contacts_data.append(row_data)
+                            
+                            contacts_df = pd.DataFrame(contacts_data)
                             club_contacts = contacts_df[contacts_df['Club'] == selected_club]
                             
                             if not club_contacts.empty:
@@ -265,8 +283,10 @@ def email_generator_page():
                                                             to_email=selected_contact['email'],
                                                             to_name=selected_contact['name'],
                                                             subject=f"DxO Labs Partnership - {email_type.title()}",
-                                                            html_content=email_content.replace('\n', '<br>'),
-                                                            text_content=email_content
+                                                            content=email_content,
+                                                            club_name=selected_club,
+                                                            contact_role=selected_contact['role'],
+                                                            email_type=email_type
                                                         )
                                                         
                                                         if send_result['success']:

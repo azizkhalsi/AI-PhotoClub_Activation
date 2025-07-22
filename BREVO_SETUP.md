@@ -9,24 +9,28 @@
 4. Copy the API key
 
 ### 2. Environment Configuration
-Add your API key to environment variables:
+Add your API key and sender configuration to environment variables:
 
 ```bash
-# Option 1: Set environment variable
+# Option 1: Set environment variables
 export BREVO_API_KEY="your-api-key-here"
+export BREVO_SENDER_EMAIL="akhalsi@dxo.com"
+export BREVO_SENDER_NAME="Aziz Khalsi - DxO Labs Partnerships"
 
 # Option 2: Add to .env file
 echo "BREVO_API_KEY=your-api-key-here" >> .env
+echo "BREVO_SENDER_EMAIL=akhalsi@dxo.com" >> .env
+echo "BREVO_SENDER_NAME=Aziz Khalsi - DxO Labs Partnerships" >> .env
 ```
 
-### 3. Configure Sender Email
-Edit `src/brevo_email_service.py` line 74:
-```python
-"sender": {
-    "name": "Your Company Name",
-    "email": "your-verified-email@yourdomain.com"  # Must be verified in Brevo
-},
-```
+### 3. Sender Email Configuration ✅ **Already Configured**
+The sender email is now set to **akhalsi@dxo.com** by default. You can override this by setting the `BREVO_SENDER_EMAIL` environment variable if needed.
+
+**Current Configuration:**
+- **Email**: akhalsi@dxo.com  
+- **Name**: Aziz Khalsi - DxO Labs Partnerships
+
+**Important**: Make sure `akhalsi@dxo.com` is verified in your Brevo account dashboard under **Senders & IP** section.
 
 ## 📧 Features
 
@@ -116,9 +120,10 @@ print(f"Reply rate: {metrics['reply_rate']:.1f}%")
 - Check `.env` file is in project root
 
 ### Sender Email
-- Email must be verified in Brevo dashboard
-- Check **Senders & IP** section in Brevo
-- Use a domain you own for better deliverability
+- **akhalsi@dxo.com** must be verified in Brevo dashboard
+- Check **Senders & IP** section in Brevo to verify this email
+- DxO domain should provide excellent deliverability
+- If using a different sender email, set `BREVO_SENDER_EMAIL` environment variable
 
 ### File Permissions
 - Ensure `data/` directory is writable

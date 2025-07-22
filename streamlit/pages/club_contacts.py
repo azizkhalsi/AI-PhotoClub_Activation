@@ -13,6 +13,7 @@ try:
     from brevo_email_service import BrevoEmailService
     from email_personalizer import EmailPersonalizer
     from club_status_manager import ClubStatusManager, ResponseStatus
+    from response_manager import ResponseManager
 except ImportError as e:
     st.error(f"Import error: {e}")
     st.stop()
@@ -24,6 +25,7 @@ def get_managers():
     try:
         email_personalizer = EmailPersonalizer()
         status_manager = ClubStatusManager()
+        response_manager = ResponseManager()
         
         try:
             brevo_service = BrevoEmailService()
@@ -35,14 +37,14 @@ def get_managers():
             brevo_service = None
             brevo_available = False
             
-        return email_personalizer, status_manager, brevo_service, brevo_available
+        return email_personalizer, status_manager, response_manager, brevo_service, brevo_available
     except Exception as e:
         st.error(f"Error initializing services: {e}")
-        return None, None, None, False
+        return None, None, None, None, False
 
 @st.cache_data(ttl=30)  # Cache for 30 seconds
 def load_contacts_data():
-    """Load and cache contacts data"""
+    """Load and cache contacts data with custom CSV parsing to handle field count mismatches"""
     possible_paths = [
         "test_results_20250701_092437.csv",
         "../test_results_20250701_092437.csv", 
@@ -58,17 +60,29 @@ def load_contacts_data():
     if not contacts_file:
         return pd.DataFrame()
     
-    return pd.read_csv(
-        contacts_file,
-        encoding='utf-8',
-        quotechar='"',
-        escapechar='\\',
-        on_bad_lines='skip',
-        engine='python',
-        skipinitialspace=True,
-        doublequote=True,
-        sep=','
-    )
+    # Custom CSV parsing to handle field count mismatches (same as email generator)
+    import csv
+    contacts_data = []
+    
+    try:
+        with open(contacts_file, 'r', encoding='utf-8') as f:
+            # Read header properly
+            header_line = f.readline().strip()
+            header = header_line.split(',')
+            expected_fields = len(header)
+            
+            # Read data rows
+            reader = csv.reader(f, quotechar='"')
+            for row_num, row in enumerate(reader, start=2):
+                if len(row) >= expected_fields:
+                    # Truncate to expected number of fields if there are extras
+                    row_data = dict(zip(header, row[:expected_fields]))
+                    contacts_data.append(row_data)
+        
+        return pd.DataFrame(contacts_data)
+    except Exception as e:
+        print(f"Error loading contacts data: {e}")
+        return pd.DataFrame()
 
 def show_notification_bell(status_manager):
     """Compact notification bell in header"""
@@ -91,7 +105,14 @@ def show_notification_bell(status_manager):
     if st.session_state.get('show_notifications', False) and notifications:
         with st.expander("🔔 Recent Notifications", expanded=True):
             for notif in notifications[-3:]:  # Show only last 3
-                created = datetime.fromisoformat(notif['created_at']).strftime("%H:%M")
+                try:
+                    created_at = notif.get('created_at', '')
+                    if isinstance(created_at, str) and created_at.strip():
+                        created = datetime.fromisoformat(created_at).strftime("%H:%M")
+                    else:
+                        created = "unknown"
+                except (ValueError, TypeError):
+                    created = "unknown"
                 st.info(f"📮 {notif['club_name']} - {notif['email_type']} ({created})")
             
             col_close, col_read = st.columns(2)
@@ -315,8 +336,11 @@ def show_current_stage_and_activity(selected_club, status_manager):
         status = club_status.get(f'{email_type}_status')
         sent_date = club_status.get(f'{email_type}_sent_date')
         
-        if status and sent_date:
-            date_str = datetime.fromisoformat(sent_date).strftime("%m/%d")
+        if status and sent_date and isinstance(sent_date, str) and sent_date.strip():
+            try:
+                date_str = datetime.fromisoformat(sent_date).strftime("%m/%d")
+            except (ValueError, TypeError):
+                date_str = "unknown"
             if status == 'email_sent':
                 activities.append(f"📤 {email_type.title()} sent ({date_str})")
             elif status == 'positive_response':
@@ -340,22 +364,29 @@ def show_current_stage_and_activity(selected_club, status_manager):
                 response_emails.append(email_type)
         
         if response_emails:
-            cols = st.columns(len(response_emails))
-            for i, email_type in enumerate(response_emails):
-                with cols[i]:
-                    col_pos, col_neg = st.columns(2)
-                    with col_pos:
-                        if st.button("✅", key=f"pos_{email_type}", help=f"Positive {email_type}"):
-                            status_manager.record_response(selected_club, email_type, 
-                                                         ResponseStatus.POSITIVE_RESPONSE.value,
-                                                         f"Positive response on {datetime.now().strftime('%Y-%m-%d')}")
-                            st.rerun()
-                    with col_neg:
-                        if st.button("❌", key=f"neg_{email_type}", help=f"Negative {email_type}"):
-                            status_manager.record_response(selected_club, email_type,
-                                                         ResponseStatus.NEGATIVE_RESPONSE.value, 
-                                                         f"Negative response on {datetime.now().strftime('%Y-%m-%d')}")
-                            st.rerun()
+            st.markdown("**Quick Response:**")
+            for email_type in response_emails:
+                # Simple layout without nested columns
+                st.markdown(f"*{email_type.title()} Email Response:*")
+                
+                # Create a container for the buttons
+                with st.container():
+                    if st.button(f"✅ Positive Response for {email_type.title()}", 
+                               key=f"pos_{email_type}", 
+                               use_container_width=True):
+                        status_manager.record_response(selected_club, email_type, 
+                                                     ResponseStatus.POSITIVE_RESPONSE.value,
+                                                     f"Positive response on {datetime.now().strftime('%Y-%m-%d')}")
+                        st.rerun()
+                    
+                    if st.button(f"❌ Negative Response for {email_type.title()}", 
+                               key=f"neg_{email_type}", 
+                               use_container_width=True):
+                        status_manager.record_response(selected_club, email_type,
+                                                     ResponseStatus.NEGATIVE_RESPONSE.value, 
+                                                     f"Negative response on {datetime.now().strftime('%Y-%m-%d')}")
+                        st.rerun()
+                st.markdown("---")
 
 def show_club_status(selected_club, status_manager):
     """Show club status information"""
@@ -376,65 +407,111 @@ def show_club_status(selected_club, status_manager):
     updated_at = club_status.get('updated_at', '')
     last_activity = club_status.get('last_activity_date', '')
     
-    if created_at:
-        created_date = datetime.fromisoformat(created_at).strftime("%m/%d/%Y")
-        st.text(f"📅 First Contact: {created_date}")
+    if created_at and isinstance(created_at, str) and created_at.strip():
+        try:
+            created_date = datetime.fromisoformat(created_at).strftime("%m/%d/%Y")
+            st.text(f"📅 First Contact: {created_date}")
+        except (ValueError, TypeError):
+            st.text(f"📅 First Contact: {created_at}")
     
-    if last_activity:
-        last_date = datetime.fromisoformat(last_activity).strftime("%m/%d/%Y")
-        st.text(f"🕒 Last Activity: {last_date}")
+    if last_activity and isinstance(last_activity, str) and last_activity.strip():
+        try:
+            last_date = datetime.fromisoformat(last_activity).strftime("%m/%d/%Y")
+            st.text(f"🕒 Last Activity: {last_date}")
+        except (ValueError, TypeError):
+            st.text(f"🕒 Last Activity: {last_activity}")
     
-    # Show any additional notes or information
-    intro_notes = club_status.get('introduction_notes', '')
-    checkup_notes = club_status.get('checkup_notes', '')
-    acceptance_notes = club_status.get('acceptance_notes', '')
-    
-    all_notes = [intro_notes, checkup_notes, acceptance_notes]
-    notes_text = ' | '.join([note for note in all_notes if note])
-    
-    if notes_text:
-        st.markdown("**Notes:**")
-        st.text(notes_text)
 
-def handle_email_generation(status_manager, email_personalizer, brevo_service):
-    """Handle email generation and sending"""
-    if st.session_state.get('generating_email', False):
-        club = st.session_state.get('send_club')
-        contact = st.session_state.get('send_contact')
+
+def show_response_manager(selected_club, selected_contact, response_manager, status_manager):
+    """Show response management interface"""
+    if not selected_club:
+        st.info("Select a club to manage responses")
+        return
+    
+    # Check for new responses button
+    col_check, col_stats = st.columns(2)
+    
+    with col_check:
+        if st.button("🔍 Check New Responses", use_container_width=True):
+            with st.spinner("Checking for responses..."):
+                result = response_manager.run_response_check()
+                if result['new_responses_found'] > 0:
+                    st.success(f"✅ Found {result['new_responses_found']} new responses!")
+                else:
+                    st.info("📭 No new responses found")
+    
+    with col_stats:
+        # Show response stats
+        stats = response_manager.get_response_stats()
+        total_responses = stats.get('total_responses', 0)
+        unprocessed = stats.get('unprocessed_count', 0)
         
-        if club and contact:
-            with st.spinner("Generating and sending email..."):
-                try:
-                    # Generate email - returns (complete_email, personalized_content, club_research, total_costs)
-                    complete_email, personalized_content, club_research, total_costs = email_personalizer.generate_personalized_email(
-                        club, 'introduction', auto_research=True
+        if total_responses > 0:
+            st.metric("Total Responses", f"{total_responses}")
+            if unprocessed > 0:
+                st.warning(f"⚠️ {unprocessed} unprocessed")
+        else:
+            st.info("No responses yet")
+    
+    # Manual response entry
+    if selected_contact:
+        with st.expander("📝 Add Manual Response"):
+            email_type = st.selectbox(
+                "Email Type",
+                ["introduction", "checkup", "acceptance"],
+                key="response_email_type"
+            )
+            
+            response_type = st.selectbox(
+                "Response Type",
+                ["positive_response", "negative_response", "neutral_response"],
+                key="response_type",
+                format_func=lambda x: x.replace('_', ' ').title()
+            )
+            
+            response_content = st.text_area(
+                "Response Content",
+                placeholder="Enter the actual response content from the club...",
+                height=100,
+                key="response_content"
+            )
+            
+            if st.button("💾 Save Response", type="primary"):
+                if response_content.strip():
+                    success = response_manager.save_response(
+                        club_name=selected_club,
+                        contact_email=selected_contact['email'],
+                        email_type=email_type,
+                        response_content=response_content,
+                        response_type=response_type,
+                        detection_method='manual'
                     )
                     
-                    # Send via Brevo
-                    send_result = brevo_service.send_email(
-                        to_email=contact['email'],
-                        to_name=contact['name'], 
-                        subject=f"DxO Labs Partnership - {contact['name']}",
-                        content=complete_email,
-                        club_name=club,
-                        contact_role=contact['role'],
-                        email_type='introduction'
-                    )
-                    
-                    if send_result['success']:
-                        # Track status
-                        status_manager.update_email_sent(club, 'introduction', 
-                                                       f"Email sent to {contact['name']} on {datetime.now().strftime('%Y-%m-%d')}")
-                        st.success(f"✅ Email sent to {contact['name']}!")
-                        st.info(f"💰 Generation cost: ${total_costs.get('total_cost', 0):.4f}")
+                    if success:
+                        st.success("✅ Response saved successfully!")
+                        st.rerun()
                     else:
-                        st.error(f"❌ Send failed: {send_result['error']}")
-                        
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
-                
-                finally:
-                    st.session_state['generating_email'] = False
+                        st.error("❌ Failed to save response (may already exist)")
+                else:
+                    st.warning("Please enter response content")
+    
+    # Show existing responses for this club
+    club_responses = response_manager.get_all_responses(selected_club)
+    if club_responses:
+        st.markdown("**📋 Existing Responses:**")
+        for response in club_responses[-3:]:  # Show last 3
+            response_date = response['response_date'][:10]
+            response_type = response['response_type'].replace('_', ' ').title()
+            email_type = response['email_type'].title()
+            
+            st.markdown(f"""
+            <div style="background: #f0f0f0; padding: 8px; border-radius: 4px; margin: 4px 0;">
+            <small><strong>{email_type}</strong> - {response_type} ({response_date})</small><br>
+            <small>{response['response_content'][:80]}...</small>
+            </div>
+            """, unsafe_allow_html=True)
+
 
 def club_contacts_page():
     """Optimized club contacts page"""
@@ -462,7 +539,7 @@ def club_contacts_page():
         st.error("Failed to initialize services")
         return
     
-    email_personalizer, status_manager, brevo_service, brevo_available = managers
+    email_personalizer, status_manager, response_manager, brevo_service, brevo_available = managers
     
     # Load data (cached)
     contacts_df = load_contacts_data()
@@ -511,6 +588,11 @@ def club_contacts_page():
         # Current stage and email activity
         st.markdown("### 📊 Current Stage")
         show_current_stage_and_activity(selected_club, status_manager)
+        
+        # Response management
+        st.markdown("---")
+        st.markdown("### 📥 Response Manager")
+        show_response_manager(selected_club, selected_contact, response_manager, status_manager)
     
     with col_right:
         st.markdown("### 📊 Club Status")
@@ -521,68 +603,99 @@ def club_contacts_page():
         # Show conversation if available
         if selected_club and selected_contact:
             st.markdown("---")
-            st.markdown("### 💬 Email Conversation")
+            st.markdown(f"### 💬 Email Conversation with {selected_contact['name']}")
             
-            # Get email exchanges from status manager and email content from tracking
-            club_status = status_manager.get_club_status(selected_club)
-            
-            if club_status:
-                email_exchanges = []
+            # Get contact-specific email conversation from Brevo tracking
+            try:
+                # Load Brevo email tracking data (contact-specific)
+                brevo_tracking_df = pd.read_csv('data/email_tracking.csv')
                 
-                # Load email content from tracking CSV
+                # Filter for this specific contact
+                contact_emails = brevo_tracking_df[
+                    (brevo_tracking_df['club_name'] == selected_club) & 
+                    (brevo_tracking_df['contact_email'] == selected_contact['email'])
+                ]
+                
+                # Also load conversation data if available
                 try:
-                    tracking_df = pd.read_csv('sent_emails_tracking.csv')
-                    club_emails = tracking_df[tracking_df['club_name'] == selected_club]
-                except:
-                    club_emails = pd.DataFrame()
+                    conversation_df = pd.read_csv('data/email_conversations.csv')
+                    contact_conversation = conversation_df[
+                        (conversation_df['club_name'] == selected_club) &
+                        (conversation_df['contact_email'] == selected_contact['email'])
+                    ]
+                except FileNotFoundError:
+                    contact_conversation = pd.DataFrame()
                 
-                # Create timeline from status data
-                for email_type in ['introduction', 'checkup', 'acceptance']:
-                    status = club_status.get(f'{email_type}_status')
-                    sent_date = club_status.get(f'{email_type}_sent_date')
-                    response_notes = club_status.get(f'{email_type}_response_notes', '')
+                if not contact_emails.empty or not contact_conversation.empty:
+                    # Combine tracking and conversation data
+                    all_messages = []
                     
-                    # Get email content if available
-                    email_content = ""
-                    if not club_emails.empty:
-                        email_record = club_emails[club_emails['email_type'] == email_type]
-                        if not email_record.empty:
-                            email_content = email_record.iloc[0].get('generated_email', '')
-                    
-                    if status and sent_date:
-                        # Add sent email
-                        email_exchanges.append({
+                    # Add sent emails from tracking
+                    for _, email in contact_emails.iterrows():
+                        all_messages.append({
                             'type': 'sent',
-                            'email_type': email_type,
-                            'date': sent_date,
-                            'status': status,
-                            'notes': response_notes,
-                            'content': email_content
+                            'email_type': email.get('email_type', 'unknown'),
+                            'date': email.get('sent_datetime', ''),
+                            'subject': email.get('subject', ''),
+                            'content': email.get('content', ''),
+                            'status': 'sent',
+                            'delivery_status': email.get('delivery_status', 'unknown'),
+                            'opened': bool(email.get('opened_datetime', '')),
+                            'clicked': bool(email.get('clicked_datetime', '')),
+                            'replied': bool(email.get('replied_datetime', ''))
                         })
+                    
+                    # Add conversation messages (sent/received)
+                    for _, msg in contact_conversation.iterrows():
+                        message_type = msg.get('message_type', 'unknown')
+                        sender = msg.get('sender', 'unknown')
                         
-                        # Add response if we got one
-                        if status in ['positive_response', 'negative_response']:
-                            email_exchanges.append({
-                                'type': 'received',
-                                'email_type': email_type,
-                                'date': sent_date,  # Use same date for now
-                                'status': status,
-                                'notes': response_notes,
-                                'content': response_notes  # Use notes as response content
-                            })
-                
-                # Sort by date
-                email_exchanges.sort(key=lambda x: x['date'])
-                
-                if email_exchanges:
-                    for i, exchange in enumerate(email_exchanges):
-                        date_str = datetime.fromisoformat(exchange['date']).strftime("%m/%d %H:%M")
-                        email_type = exchange['email_type'].title()
-                        content = exchange.get('content', '')
-                        
-                        if exchange['type'] == 'sent':
-                            # Show sent emails on the left with preview
-                            with st.container():
+                        all_messages.append({
+                            'type': message_type,
+                            'email_type': 'conversation',
+                            'date': msg.get('message_datetime', ''),
+                            'subject': msg.get('subject', ''),
+                            'content': msg.get('content', ''),
+                            'status': msg.get('status', 'unknown'),
+                            'sender': sender
+                        })
+                    
+                    # Sort by date
+                    def safe_date_key(message):
+                        date_value = message.get('date', '')
+                        if pd.isna(date_value) or not date_value:
+                            return '1900-01-01'
+                        return str(date_value)
+                    
+                    all_messages.sort(key=safe_date_key)
+                    
+                    if all_messages:
+                        for i, message in enumerate(all_messages):
+                            try:
+                                message_date = message.get('date', '')
+                                if isinstance(message_date, str) and message_date.strip():
+                                    date_str = datetime.fromisoformat(message_date).strftime("%m/%d %H:%M")
+                                else:
+                                    date_str = "unknown"
+                            except (ValueError, TypeError):
+                                date_str = "unknown"
+                            
+                            email_type = message.get('email_type', 'unknown').title()
+                            subject = message.get('subject', '')
+                            content = message.get('content', '')
+                            
+                            if message['type'] == 'sent':
+                                # Show sent emails with status indicators
+                                status_indicators = ""
+                                if message.get('delivery_status') == 'sent':
+                                    status_indicators += "📤 "
+                                if message.get('opened'):
+                                    status_indicators += "👁️ "
+                                if message.get('clicked'):
+                                    status_indicators += "🖱️ "
+                                if message.get('replied'):
+                                    status_indicators += "💬 "
+                                
                                 # Create preview (first 2 lines)
                                 preview = ""
                                 if content:
@@ -593,8 +706,9 @@ def club_contacts_page():
                                         preview = preview[:100] + "..."
                                 
                                 st.markdown(f"""
-                                <div style="background: #e3f2fd; padding: 10px; border-radius: 8px; margin: 8px 0; border-left: 4px solid #2196f3; cursor: pointer;">
-                                📤 <strong>Sent {email_type} Email</strong><br>
+                                <div style="background: #e3f2fd; padding: 10px; border-radius: 8px; margin: 8px 0; border-left: 4px solid #2196f3;">
+                                📤 <strong>Sent to {selected_contact['name']}</strong> {status_indicators}<br>
+                                <strong>{subject}</strong><br>
                                 <small style="color: #666;">{date_str}</small><br>
                                 <small style="color: #888; font-style: italic;">{preview}</small>
                                 </div>
@@ -602,48 +716,55 @@ def club_contacts_page():
                                 
                                 # Expandable full email content
                                 if content:
-                                    with st.expander(f"📄 View Full {email_type} Email", key=f"email_{i}"):
+                                    with st.expander(f"📄 View Full Email"):
                                         st.text_area(
                                             "Email Content",
                                             value=content,
                                             height=400,
                                             disabled=True,
-                                            label_visibility="collapsed"
+                                            label_visibility="collapsed",
+                                            key=f"email_content_{i}_{selected_contact['email']}"
                                         )
                                         
                                         # Copy button
                                         if st.button(f"📋 Copy Email", key=f"copy_{i}"):
                                             st.code(content, language="text")
                                             st.success("📋 Email content displayed above - select all and copy!")
-                        else:
-                            # Show received responses on the right (indented)
-                            with st.container():
-                                response_color = "#4caf50" if exchange['status'] == 'positive_response' else "#f44336"
-                                response_icon = "✅" if exchange['status'] == 'positive_response' else "❌"
-                                response_text = "Positive Response" if exchange['status'] == 'positive_response' else "Negative Response"
-                                
-                                st.markdown(f"""
-                                <div style="background: #f1f8e9; padding: 10px; border-radius: 8px; margin: 8px 0 16px 40px; border-left: 4px solid {response_color};">
-                                📥 {response_icon} <strong>{response_text}</strong><br>
-                                <small style="color: #666;">{date_str}</small>
-                                {f'<br><em>{exchange["notes"]}</em>' if exchange["notes"] else ''}
-                                </div>
-                                """, unsafe_allow_html=True)
-                                
-                                # If there's response content, show it expandable too
-                                if content and content != exchange['notes']:
-                                    with st.expander(f"📄 View Response Details", key=f"response_{i}"):
-                                        st.text_area(
-                                            "Response Content",
-                                            value=content,
-                                            height=200,
-                                            disabled=True,
-                                            label_visibility="collapsed"
-                                        )
+                            
+                            elif message['type'] == 'received':
+                                # Show received responses
+                                with st.container():
+                                    st.markdown(f"""
+                                    <div style="background: #f1f8e9; padding: 10px; border-radius: 8px; margin: 8px 0 16px 40px; border-left: 4px solid #4caf50;">
+                                    📥 <strong>Response from {selected_contact['name']}</strong><br>
+                                    <strong>{subject}</strong><br>
+                                    <small style="color: #666;">{date_str}</small><br>
+                                    <em>{content[:200]}{'...' if len(content) > 200 else ''}</em>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    # Show full response if longer
+                                    if len(content) > 200:
+                                        with st.expander(f"📄 View Full Response"):
+                                            st.text_area(
+                                                "Response Content",
+                                                value=content,
+                                                height=200,
+                                                disabled=True,
+                                                label_visibility="collapsed",
+                                                key=f"response_content_{i}_{selected_contact['email']}"
+                                            )
+                    else:
+                        st.info(f"No email conversation found with {selected_contact['name']}")
                 else:
-                    st.info("No email activity yet")
-            else:
-                st.info("No club status found")
+                    st.info(f"No emails sent to {selected_contact['name']} yet")
+                    
+            except FileNotFoundError:
+                st.warning("⚠️ Email tracking files not found. Start sending emails via the Email Generator to see conversation history here.")
+            except Exception as e:
+                st.error(f"❌ Error loading email conversation: {e}")
+                # Fallback to old system
+                st.info("Using fallback email tracking...")
 
 if __name__ == "__main__":
     st.set_page_config(
